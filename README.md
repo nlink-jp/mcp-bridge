@@ -3,9 +3,8 @@
 Connect stdio-only MCP clients to Streamable HTTP MCP servers that require a
 **pre-registered OAuth client**.
 
-> **Status: not released.** The bridge works for servers needing no
-> authentication or a static header. OAuth login is not implemented yet, so the
-> providers this tool exists for are not usable yet. See
+> **Status: not released.** Feature-complete and tested, but not yet packaged
+> or verified against a live provider. See
 > [Development status](#development-status).
 
 ## Who this is for
@@ -61,6 +60,18 @@ Flags:
 | `--callback-port <n>` | `login` | Fixed loopback port for the OAuth callback, overriding the config |
 
 `--version` is accepted as an alias for the `version` subcommand.
+
+A first session with an OAuth server looks like this:
+
+```bash
+mcp-bridge login slack      # opens a browser, stores the tokens
+mcp-bridge inspect slack    # confirms the connection and lists the tools
+mcp-bridge list             # shows which servers are logged in
+```
+
+`inspect` is the quickest way to tell whether a configuration is right: it
+connects, authenticates, and prints what the server says it is, without
+wiring the bridge into an MCP client first.
 
 ## Configuration
 
@@ -139,19 +150,45 @@ Implementation follows the RFP
 | Phase | Scope | State |
 |-------|-------|-------|
 | Core | Config loader, stdio ⇄ Streamable HTTP relay, no-auth and static headers, `run` / `list` / `version` | done |
-| Features | OAuth authorization_code, https loopback callback, RFC 8414 + RFC 7591 discovery, `login` / `logout` / `inspect`, `tokenCommand` | not started |
+| Features | OAuth authorization_code, https loopback callback, RFC 8414 + RFC 7591 discovery, `login` / `logout` / `inspect`, `tokenCommand` | done |
 | Release | Docs, ADRs, signing, Homebrew tap, umbrella integration | not started |
 
-What works today:
+Every subcommand and every authentication mode in the configuration is
+implemented. What remains before a release is packaging — signing,
+notarization, the Homebrew tap — and an end-to-end run against a real provider,
+which the tests approximate but do not replace.
 
-- `run` against a server needing no authentication or a static header
-- `list`, `version`, and `--version`
+## How the OAuth login works
 
-What does not:
+`login` starts a loopback listener, opens a browser at the provider's
+authorization endpoint, and exchanges the returned code for tokens. PKCE
+(RFC 7636) is used on every login, including for confidential clients.
 
-- `login`, `logout`, `inspect` — they report that they are not implemented
-- Any server configured with `oauth` or `tokenCommand`; `run` rejects it by
-  name rather than failing later as an unexplained 401
+**Discovery.** With `"oauth": {}` the endpoints are found through the
+protected-resource metadata the server advertises in its 401 challenge
+(RFC 9728), falling back to the well-known metadata paths on the server's own
+host, and a client is registered dynamically (RFC 7591). The result is cached
+per server, so a fixed callback port reuses one registration instead of
+creating a new client record on the provider at every login.
+
+**The https callback.** Some providers — Slack in particular — reject an
+`http://` loopback redirect URI when the OAuth app is registered. Setting
+`"callbackScheme": "https"` makes the listener present an ephemeral
+self-signed certificate that never leaves memory, and the redirect URI uses
+`localhost`, which such providers accept where they reject the IP literal.
+The browser shows a one-time "not secure" warning; continuing past it is the
+expected path.
+
+**Fixed ports.** A pre-registered OAuth app declares one exact redirect URI, so
+its callback port cannot change between logins. Set `"callbackPort"`, or pass
+`--callback-port` for a one-off. If that port is busy the login says so rather
+than quietly picking another one the provider would refuse.
+
+**Token lifetime.** A provider that returns neither `expires_in` nor a refresh
+token has issued a token with no known expiry — Slack does this when token
+rotation is disabled — and mcp-bridge uses it until the server rejects it.
+Inventing an expiry for such a token would force a re-login every hour for no
+reason. Where a refresh token exists, renewal is automatic.
 
 ## Build
 

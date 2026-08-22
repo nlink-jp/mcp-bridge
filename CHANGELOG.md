@@ -6,9 +6,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-The Core phase of the RFP is complete: a server needing no authentication or a
-static header can be bridged end to end. OAuth login is not implemented, so the
-providers this tool exists for are not usable yet.
+The Core and Features phases of the RFP are complete. Every subcommand and
+every authentication mode the configuration accepts is implemented. What
+remains before a release is packaging and a run against a live provider.
 
 ### Added
 
@@ -25,8 +25,28 @@ providers this tool exists for are not usable yet.
   response carrying the cause.
 - `run` for servers with no authentication or static headers, and `list`
   showing each server's authentication mode, login state, and URL.
-- Configured-but-unimplemented authentication (`oauth`, `tokenCommand`) is
-  rejected by name at startup rather than failing later as an unexplained 401.
+- OAuth 2.0 authorization_code login with PKCE on every login, a loopback
+  callback listener, and automatic refresh where a refresh token exists.
+  Tokens live in `tokens.json` (mode 0600, written atomically).
+- An https callback option that presents an ephemeral self-signed certificate
+  and redirects to `localhost`. This is what makes providers reachable that
+  reject `http://` loopback redirect URIs at app-registration time — Slack
+  most notably.
+- Endpoint discovery through the 401 challenge's protected-resource metadata
+  (RFC 9728), falling back to both well-known metadata paths (RFC 8414 and
+  OpenID provider metadata), plus dynamic client registration (RFC 7591). The
+  result is cached with the redirect URI it was registered for, so a fixed
+  callback port reuses one registration instead of creating a client record on
+  the provider at every login.
+- `tokenCommand`: a Bearer token from an external command such as
+  `gcloud auth print-access-token`. The command runs directly rather than
+  through a shell, and multi-line output is refused rather than truncated.
+- `login`, `logout`, and `inspect`. `inspect` connects, authenticates, and
+  prints the server's identity and tool list, so a configuration can be
+  checked before it is wired into an MCP client.
+- A missing or expired login is reported as the command that fixes it, at
+  startup, rather than as an unexplained 401 later or a missing file the user
+  never created by hand.
 
 - RFP (Phase 1 planning) in `docs/{en,ja}/`, fixing the final shape before
   implementation: scope limited to providers without RFC 7591 Dynamic Client
@@ -43,5 +63,5 @@ providers this tool exists for are not usable yet.
 
 ## [0.1.0] - unreleased
 
-First release. Planned scope: config loader, stdio to Streamable HTTP relay,
-no-auth and static-header authentication, `run` / `list` / `version`.
+First release. Planned scope: everything listed above, once it is packaged and
+verified against a live provider.

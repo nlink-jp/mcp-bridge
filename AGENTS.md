@@ -15,8 +15,9 @@ direction is not supported.
 - Module path: `github.com/nlink-jp/mcp-bridge`
 - Series: util-series
 - Language: Go, standard library only (`go.mod` has zero require lines)
-- Status: Core phase complete. `run` (no-auth / static headers), `list`, and
-  `version` work; `login`, `logout`, `inspect`, `tokenCommand`, and OAuth do not.
+- Status: Core and Features phases complete; not yet released. Every
+  subcommand and every configured authentication mode works. Remaining:
+  packaging (signing, notarization, Homebrew tap) and a live-provider run.
 
 ## Build and test
 
@@ -40,7 +41,9 @@ internal/config/             Single-file JSON config, strict decode, path resolu
 internal/jsonrpc/            JSON-RPC 2.0 shapes and error-response building
 internal/transport/          Streamable HTTP client (OAuth token provider hook)
 internal/bridge/             Transparent stdio relay
-internal/cli/                Subcommand bodies (run, list; login/inspect to come)
+internal/oauth/              authorization_code + PKCE, discovery, DCR, token store
+internal/tokencmd/           Bearer tokens from an external command
+internal/cli/                Subcommand bodies (run, list, login, logout, inspect)
 scripts/docs-mirror-check.sh Verifies docs/en and docs/ja are structural mirrors
 docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
                              currently holds the RFP
@@ -48,7 +51,9 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
 
 ## Runtime layout
 
-- Config: `~/.config/mcp-bridge/config.json` (single file, strictly decoded)
+- Config: `~/.config/mcp-bridge/config.json` (single file, strictly decoded).
+  `XDG_CONFIG_HOME` overrides the base directory, which is how tests stay off
+  the developer's real configuration and token files.
 - State: `~/.config/mcp-bridge/state/<server>/` holding `tokens.json` (mode
   0600) and `discovery.json`
 
@@ -71,6 +76,13 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
 - **Scope is fixed by the RFP** in `docs/ja/mcp-bridge-rfp.ja.md`. Governance
   gates, audit receipts, telemetry export, tool masking, and the
   client_credentials flow are out of scope by decision.
+- **An expiry of zero means "no known expiry", not "expired at the epoch".**
+  A token with no refresh token is used as stored whatever its expiry says;
+  the server is the judge, via a 401. Treating zero as expired makes Slack
+  demand a fresh login every hour.
+- **Outgoing stdio messages are compacted.** A server that pretty-prints its
+  JSON would otherwise split one message across several lines and
+  desynchronise the client for the rest of the session.
 
 ## Relationship to mcp-guardian
 
