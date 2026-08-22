@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/nlink-jp/mcp-bridge/internal/cli"
 )
 
 // version is injected at build time via -ldflags "-X main.version=...".
@@ -42,8 +44,7 @@ Run "mcp-bridge <command> --help" for the flags of a single command.
 // without printing a second diagnostic.
 var errUsage = errors.New("usage")
 
-// errNotImplemented marks the scaffolded commands. Phase 1 replaces the run/
-// list bodies, Phase 2 the login/logout/inspect bodies.
+// errNotImplemented marks the commands the OAuth phase still has to fill in.
 var errNotImplemented = errors.New("not implemented yet")
 
 func main() {
@@ -119,8 +120,15 @@ func cmdRun(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_ = configPath
-	return fmt.Errorf("run %s: %w", name, errNotImplemented)
+	// stdin is read directly rather than through the injected reader: run is
+	// the one command whose input is the live client connection.
+	return cli.Run(cli.RunOptions{
+		ConfigPath: *configPath,
+		Server:     name,
+		In:         os.Stdin,
+		Out:        stdout,
+		Logs:       stderr,
+	})
 }
 
 func cmdLogin(args []string, stdout, stderr io.Writer) error {
@@ -152,8 +160,7 @@ func cmdList(args []string, stdout, stderr io.Writer) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("list: takes no arguments, got %d", fs.NArg())
 	}
-	_ = configPath
-	return fmt.Errorf("list: %w", errNotImplemented)
+	return cli.List(cli.ListOptions{ConfigPath: *configPath, Out: stdout})
 }
 
 func cmdInspect(args []string, stdout, stderr io.Writer) error {

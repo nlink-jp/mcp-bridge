@@ -3,8 +3,10 @@
 Connect stdio-only MCP clients to Streamable HTTP MCP servers that require a
 **pre-registered OAuth client**.
 
-> **Status: not released.** The scaffold is in place; the bridge is not
-> implemented yet. See [Development status](#development-status).
+> **Status: not released.** The bridge works for servers needing no
+> authentication or a static header. OAuth login is not implemented yet, so the
+> providers this tool exists for are not usable yet. See
+> [Development status](#development-status).
 
 ## Who this is for
 
@@ -131,15 +133,25 @@ Run `mcp-bridge login slack` once before the client starts.
 
 ## Development status
 
-The project is scaffolded; the commands are wired but return
-`not implemented yet`. Implementation follows the RFP
+Implementation follows the RFP
 ([English](docs/en/mcp-bridge-rfp.md) / [日本語](docs/ja/mcp-bridge-rfp.ja.md)):
 
 | Phase | Scope | State |
 |-------|-------|-------|
-| Core | Config loader, stdio ⇄ Streamable HTTP relay, no-auth and static headers, `run` / `list` / `version` | not started |
+| Core | Config loader, stdio ⇄ Streamable HTTP relay, no-auth and static headers, `run` / `list` / `version` | done |
 | Features | OAuth authorization_code, https loopback callback, RFC 8414 + RFC 7591 discovery, `login` / `logout` / `inspect`, `tokenCommand` | not started |
 | Release | Docs, ADRs, signing, Homebrew tap, umbrella integration | not started |
+
+What works today:
+
+- `run` against a server needing no authentication or a static header
+- `list`, `version`, and `--version`
+
+What does not:
+
+- `login`, `logout`, `inspect` — they report that they are not implemented
+- Any server configured with `oauth` or `tokenCommand`; `run` rejects it by
+  name rather than failing later as an unexplained 401
 
 ## Build
 

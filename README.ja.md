@@ -3,7 +3,8 @@
 stdio しか話せない MCP クライアントから、**事前登録済み OAuth クライアント**を要求する
 Streamable HTTP MCP サーバへ接続するためのブリッジ。
 
-> **ステータス: 未リリース。** スキャフォールドのみ完了しており、ブリッジ機能は未実装です。
+> **ステータス: 未リリース。** 認証なし・静的ヘッダのサーバに対してはブリッジが動作します。
+> OAuth ログインは未実装のため、本ツールが本来対象とするプロバイダはまだ使えません。
 > [開発ステータス](#開発ステータス)を参照してください。
 
 ## 対象となる状況
@@ -127,14 +128,24 @@ typo は黙って無視されずにエラーになります。
 
 ## 開発ステータス
 
-スキャフォールドのみ完了しています。コマンドは配線済みですが `not implemented yet` を返します。
 実装は RFP（[日本語](docs/ja/mcp-bridge-rfp.ja.md) / [English](docs/en/mcp-bridge-rfp.md)）に従います:
 
 | フェーズ | 範囲 | 状態 |
 |-------|------|------|
-| Core | 設定ローダ、stdio ⇄ Streamable HTTP 中継、認証なし・静的ヘッダ、`run` / `list` / `version` | 未着手 |
+| Core | 設定ローダ、stdio ⇄ Streamable HTTP 中継、認証なし・静的ヘッダ、`run` / `list` / `version` | 完了 |
 | Features | OAuth authorization_code、https ループバックコールバック、RFC 8414 + RFC 7591 discovery、`login` / `logout` / `inspect`、`tokenCommand` | 未着手 |
 | Release | ドキュメント、ADR、署名、Homebrew tap、umbrella 統合 | 未着手 |
+
+現時点で動くもの:
+
+- 認証なし・静的ヘッダのサーバに対する `run`
+- `list` / `version` / `--version`
+
+動かないもの:
+
+- `login` / `logout` / `inspect` — 未実装である旨を返します
+- `oauth` または `tokenCommand` を設定したサーバ。`run` は理由を名指しで拒否します
+  （後段で原因不明の 401 になるより先に止めるため）
 
 ## ビルド
 

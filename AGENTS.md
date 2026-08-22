@@ -15,7 +15,8 @@ direction is not supported.
 - Module path: `github.com/nlink-jp/mcp-bridge`
 - Series: util-series
 - Language: Go, standard library only (`go.mod` has zero require lines)
-- Status: scaffolded, not implemented. Commands return `not implemented yet`.
+- Status: Core phase complete. `run` (no-auth / static headers), `list`, and
+  `version` work; `login`, `logout`, `inspect`, `tokenCommand`, and OAuth do not.
 
 ## Build and test
 
@@ -35,18 +36,15 @@ Never run `go build` directly — it drops a binary in the project root.
 ```
 main.go                      Entry point: subcommand dispatch, version, usage
 main_test.go                 Pins the CLI surface (see Gotchas)
-internal/                    Private packages, added as implementation lands:
-                               config/     single-file JSON config, strict decode
-                               jsonrpc/    JSON-RPC 2.0 message handling
-                               transport/  Streamable HTTP client, OAuth
-                               cli/        login / discover / inspect
+internal/config/             Single-file JSON config, strict decode, path resolution
+internal/jsonrpc/            JSON-RPC 2.0 shapes and error-response building
+internal/transport/          Streamable HTTP client (OAuth token provider hook)
+internal/bridge/             Transparent stdio relay
+internal/cli/                Subcommand bodies (run, list; login/inspect to come)
 scripts/docs-mirror-check.sh Verifies docs/en and docs/ja are structural mirrors
 docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
                              currently holds the RFP
 ```
-
-`internal/` does not exist yet — the subdirectories above are the planned layout,
-created as each package is written.
 
 ## Runtime layout
 
