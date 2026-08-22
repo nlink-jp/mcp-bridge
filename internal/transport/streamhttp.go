@@ -107,16 +107,20 @@ func (t *httpTransport) Send(data []byte) error {
 	// A 401 usually means the access token expired. Drop it and try once with
 	// a fresh one; a second 401 is a real authentication failure and the error
 	// says so, because the fix (log in again) differs from a retry.
+	//
+	// Both failure paths keep the 401 attached. Without it the user sees only
+	// the after-effect — "no access token" — and goes looking for an empty
+	// token file instead of a rejected credential.
 	if resp.StatusCode == http.StatusUnauthorized && t.auth != nil {
 		drain(resp)
 		t.auth.Invalidate()
 		resp, err = t.post(data)
 		if err != nil {
-			return err
+			return fmt.Errorf("upstream rejected the credentials (HTTP 401): %w", err)
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			body := readSnippet(resp)
-			return fmt.Errorf("upstream rejected the credentials (HTTP 401) after refreshing the token: %s", body)
+			return fmt.Errorf("upstream rejected the credentials (HTTP 401) again after renewing the token: %s", body)
 		}
 	}
 

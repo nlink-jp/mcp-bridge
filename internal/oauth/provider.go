@@ -33,8 +33,11 @@ type ProviderConfig struct {
 type Provider struct {
 	cfg ProviderConfig
 
-	mu     sync.Mutex
-	tokens *Tokens
+	mu sync.Mutex
+	// rejected records that the server refused this credential, so a later
+	// failure can say that rather than reporting an empty token file.
+	rejected bool
+	tokens   *Tokens
 }
 
 // NewProvider loads the stored tokens for a server.
@@ -65,6 +68,14 @@ func (p *Provider) Token() (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// A credential the server has already refused, with no way to renew it,
+	// is a dead end. Saying so beats reporting a missing access token, which
+	// is only the after-effect of Invalidate and reads like an empty file.
+	if p.rejected && !p.tokens.Refreshable() {
+		return "", fmt.Errorf("the stored login for %q was rejected by the server and there is no refresh token to renew it: run \"mcp-bridge login %s\"",
+			p.cfg.ServerName, p.cfg.ServerName)
+	}
+
 	// Without a refresh token there is nothing this code could do about an
 	// expiry, so the stored one is not actionable: return the token and let
 	// the server be the judge. Failing here instead would turn a working
@@ -94,6 +105,7 @@ func (p *Provider) Token() (string, error) {
 func (p *Provider) Invalidate() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.rejected = true
 	p.tokens.AccessToken = ""
 	p.tokens.ExpiresAt = 0
 }
@@ -125,6 +137,7 @@ func (p *Provider) refresh() (string, error) {
 		fresh.RefreshToken = p.tokens.RefreshToken
 	}
 	p.tokens = fresh
+	p.rejected = false
 
 	// A token that cannot be persisted still works for this session, so this
 	// is a warning rather than a failure — but it is worth saying, because

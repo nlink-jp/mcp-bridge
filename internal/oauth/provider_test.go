@@ -361,3 +361,51 @@ func TestProviderSatisfiesTheTransportInterface(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// After the server refuses a credential that cannot be renewed, the error must
+// say that. Reporting "no access token" instead describes only the after-effect
+// of Invalidate and sends the user looking for an empty token file.
+func TestRejectedNonRefreshableTokenSaysSo(t *testing.T) {
+	path := storedAt(t, &Tokens{AccessToken: "revoked-token"})
+	p, err := NewProvider(ProviderConfig{ServerName: "slack", TokensPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Token(); err != nil {
+		t.Fatalf("the first use should succeed: %v", err)
+	}
+
+	p.Invalidate() // what the transport does after a 401
+
+	_, err = p.Token()
+	if err == nil {
+		t.Fatal("a rejected credential was handed out again")
+	}
+	if !strings.Contains(err.Error(), "rejected by the server") {
+		t.Errorf("error does not say the credential was rejected: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mcp-bridge login slack") {
+		t.Errorf("error does not name the fix: %v", err)
+	}
+	if strings.Contains(err.Error(), "no access token") {
+		t.Errorf("error still reports the after-effect rather than the cause: %v", err)
+	}
+}
+
+// A successful refresh clears the rejection, so one 401 does not poison the
+// rest of the session.
+func TestSuccessfulRefreshClearsTheRejection(t *testing.T) {
+	ts := newTokenServer(t, `{"access_token":"fresh","expires_in":3600}`)
+	path := storedAt(t, &Tokens{AccessToken: "stale", RefreshToken: "r", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+	p, _ := NewProvider(ProviderConfig{ServerName: "s", TokensPath: path, TokenURL: ts.URL})
+
+	p.Invalidate()
+	if _, err := p.Token(); err != nil {
+		t.Fatalf("refresh after a 401: %v", err)
+	}
+	// A second Invalidate-and-refresh must work the same way.
+	p.Invalidate()
+	if _, err := p.Token(); err != nil {
+		t.Errorf("the session was poisoned by the first rejection: %v", err)
+	}
+}

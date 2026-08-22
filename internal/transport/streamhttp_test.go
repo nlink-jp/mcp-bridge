@@ -358,3 +358,49 @@ func TestCloseWaitsForStreamReaders(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// deadProvider models a stored login that cannot be renewed: the first token
+// works, and after Invalidate there is nothing left to hand out.
+type deadProvider struct {
+	mu       sync.Mutex
+	rejected bool
+}
+
+func (p *deadProvider) Token() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.rejected {
+		return "", fmt.Errorf("the stored login was rejected and cannot be renewed: run \"mcp-bridge login x\"")
+	}
+	return "revoked-token", nil
+}
+
+func (p *deadProvider) Invalidate() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.rejected = true
+}
+
+// When the retry cannot obtain a replacement token, the 401 that caused it
+// must survive into the error. Reporting only the provider's message leaves
+// the user hunting for an empty token file rather than a rejected credential.
+func TestUnauthorizedKeepsItsCauseWhenNoTokenRemains(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	tr, _ := NewHTTP(srv.URL, WithTokenProvider(&deadProvider{}))
+	defer tr.Close()
+
+	err := tr.Send([]byte(`{}`))
+	if err == nil {
+		t.Fatal("a rejected credential was not reported")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("the cause was lost: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mcp-bridge login x") {
+		t.Errorf("the fix was lost: %v", err)
+	}
+}

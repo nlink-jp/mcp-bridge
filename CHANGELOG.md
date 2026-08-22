@@ -48,6 +48,14 @@ remains before a release is packaging and a run against a live provider.
   startup, rather than as an unexplained 401 later or a missing file the user
   never created by hand.
 
+### Fixed
+
+- A 401 from the server no longer loses its cause. Invalidating the rejected
+  credential used to leave the next error saying "no access token", which
+  describes the after-effect and sends the reader looking for an empty token
+  file. Both the 401 and the login command now survive into the message.
+  Found by running against the live Slack MCP server with a revoked token.
+
 - RFP (Phase 1 planning) in `docs/{en,ja}/`, fixing the final shape before
   implementation: scope limited to providers without RFC 7591 Dynamic Client
   Registration, JSON configuration in a single file, no audit logging, six
