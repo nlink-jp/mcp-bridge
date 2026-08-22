@@ -48,6 +48,9 @@ remains before a release is packaging and a run against a live provider.
   startup, rather than as an unexplained 401 later or a missing file the user
   never created by hand.
 
+- Documentation: a four-record ADR log and a Slack setup reference, both
+  mirrored in English and Japanese.
+
 ### Fixed
 
 - A 401 from the server no longer loses its cause. Invalidating the rejected

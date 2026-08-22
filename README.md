@@ -190,6 +190,17 @@ rotation is disabled — and mcp-bridge uses it until the server rejects it.
 Inventing an expiry for such a token would force a re-login every hour for no
 reason. Where a refresh token exists, renewal is automatic.
 
+## Documentation
+
+- [Slack setup](docs/en/reference/slack-setup.md) — a worked example of the
+  whole flow, verified against the live server
+- [Design decisions](docs/en/adr/) — why the OAuth settings are explicit
+  (0001), why a failed request is always answered (0002), why a token with no
+  refresh has no expiry we can act on (0003), and why there is one strictly
+  decoded JSON config file (0004)
+- [RFP](docs/en/mcp-bridge-rfp.md) — the scope decision and what is
+  deliberately out of it
+
 ## Build
 
 ```bash
