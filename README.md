@@ -3,9 +3,9 @@
 Connect stdio-only MCP clients to Streamable HTTP MCP servers that require a
 **pre-registered OAuth client**.
 
-> **Status: not released.** Feature-complete and tested, but not yet packaged
-> or verified against a live provider. See
-> [Development status](#development-status).
+> Verified against the live Slack MCP server. GitHub Apps and Microsoft Entra
+> ID present the same shape and are expected to work, but have not been
+> exercised against a live endpoint.
 
 ## Who this is for
 
@@ -36,10 +36,16 @@ stdio MCP server over HTTP.
 ## Install
 
 ```bash
+# Homebrew
+brew install nlink-jp/tap/mcp-bridge
+
 # From source
 make build
 sudo install -m 0755 dist/mcp-bridge /usr/local/bin/mcp-bridge
 ```
+
+Release binaries are built for macOS (arm64), Linux (amd64, arm64) and Windows
+(amd64). The macOS binary is signed and notarized.
 
 ## Usage
 
@@ -142,21 +148,15 @@ with mode 0600.
 
 Run `mcp-bridge login slack` once before the client starts.
 
-## Development status
+## What is not supported
 
-Implementation follows the RFP
-([English](docs/en/mcp-bridge-rfp.md) / [日本語](docs/ja/mcp-bridge-rfp.ja.md)):
-
-| Phase | Scope | State |
-|-------|-------|-------|
-| Core | Config loader, stdio ⇄ Streamable HTTP relay, no-auth and static headers, `run` / `list` / `version` | done |
-| Features | OAuth authorization_code, https loopback callback, RFC 8414 + RFC 7591 discovery, `login` / `logout` / `inspect`, `tokenCommand` | done |
-| Release | Docs, ADRs, signing, Homebrew tap, umbrella integration | not started |
-
-Every subcommand and every authentication mode in the configuration is
-implemented. What remains before a release is packaging — signing,
-notarization, the Homebrew tap — and an end-to-end run against a real provider,
-which the tests approximate but do not replace.
+- **The reverse direction.** mcp-bridge cannot expose a stdio MCP server over
+  HTTP. Downstream is always stdio and upstream is always HTTP.
+- **Governance, auditing and telemetry.** Out of scope by decision rather than
+  omission — see the [RFP](docs/en/mcp-bridge-rfp.md). The predecessor,
+  [mcp-guardian](https://github.com/nlink-jp/mcp-guardian), has them.
+- **The client_credentials flow.** A stdio bridge launched by a local client
+  has no use for machine-to-machine authentication.
 
 ## How the OAuth login works
 

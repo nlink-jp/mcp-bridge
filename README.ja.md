@@ -3,8 +3,8 @@
 stdio しか話せない MCP クライアントから、**事前登録済み OAuth クライアント**を要求する
 Streamable HTTP MCP サーバへ接続するためのブリッジ。
 
-> **ステータス: 未リリース。** 機能は揃いテストも通っていますが、パッケージングと
-> 実プロバイダでの検証が未了です。[開発ステータス](#開発ステータス)を参照してください。
+> 実 Slack MCP サーバで検証済み。GitHub Apps と Microsoft Entra ID は同じ形をとるため
+> 動作すると考えられますが、実エンドポイントでは未検証です。
 
 ## 対象となる状況
 
@@ -32,10 +32,16 @@ mcp-bridge で stdio MCP サーバを HTTP 公開することはできません�
 ## インストール
 
 ```bash
+# Homebrew
+brew install nlink-jp/tap/mcp-bridge
+
 # ソースから
 make build
 sudo install -m 0755 dist/mcp-bridge /usr/local/bin/mcp-bridge
 ```
+
+リリースバイナリは macOS (arm64)、Linux (amd64, arm64)、Windows (amd64) 向けに提供します。
+macOS バイナリは署名・notarize 済みです。
 
 ## 使い方
 
@@ -136,19 +142,15 @@ typo は黙って無視されずにエラーになります。
 
 クライアント起動前に `mcp-bridge login slack` を一度実行してください。
 
-## 開発ステータス
+## 対応しないもの
 
-実装は RFP（[日本語](docs/ja/mcp-bridge-rfp.ja.md) / [English](docs/en/mcp-bridge-rfp.md)）に従います:
-
-| フェーズ | 範囲 | 状態 |
-|-------|------|------|
-| Core | 設定ローダ、stdio ⇄ Streamable HTTP 中継、認証なし・静的ヘッダ、`run` / `list` / `version` | 完了 |
-| Features | OAuth authorization_code、https ループバックコールバック、RFC 8414 + RFC 7591 discovery、`login` / `logout` / `inspect`、`tokenCommand` | 完了 |
-| Release | ドキュメント、ADR、署名、Homebrew tap、umbrella 統合 | 未着手 |
-
-全サブコマンドと、設定が受け付ける全認証方式が実装済みです。リリースまでに残るのは
-パッケージング（署名・notarization・Homebrew tap）と、実プロバイダでの実データ検証
-——テストは近似はしますが代替にはなりません——です。
+- **逆方向。** mcp-bridge で stdio MCP サーバを HTTP 公開することはできません。
+  下流は常に stdio、上流は常に HTTP です。
+- **ガバナンス・監査・テレメトリ。** 漏れではなく判断としてスコープ外です——
+  [RFP](docs/ja/mcp-bridge-rfp.ja.md) を参照。前身の
+  [mcp-guardian](https://github.com/nlink-jp/mcp-guardian) はこれらを持っています。
+- **client_credentials フロー。** 手元のクライアントから起動される stdio ブリッジに、
+  サーバ間認証の出番はありません。
 
 ## OAuth ログインの仕組み
 

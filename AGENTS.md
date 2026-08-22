@@ -15,9 +15,8 @@ direction is not supported.
 - Module path: `github.com/nlink-jp/mcp-bridge`
 - Series: util-series
 - Language: Go, standard library only (`go.mod` has zero require lines)
-- Status: Core and Features phases complete; not yet released. Every
-  subcommand and every configured authentication mode works. Remaining:
-  packaging (signing, notarization, Homebrew tap) and a live-provider run.
+- Status: released. Verified against the live Slack MCP server; GitHub Apps and
+  Entra ID present the same shape but are untested against a live endpoint.
 
 ## Build and test
 
