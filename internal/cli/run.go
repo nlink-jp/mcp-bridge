@@ -28,7 +28,7 @@ func Run(opts RunOptions) error {
 		return err
 	}
 
-	transportOpts, err := authOptions(srv, opts.Server)
+	transportOpts, err := transportOptions(srv, opts.Server, opts.Logs)
 	if err != nil {
 		return err
 	}
@@ -55,24 +55,4 @@ func loadServer(configPath, name string) (*config.Server, error) {
 		return nil, err
 	}
 	return file.Server(name)
-}
-
-// authOptions turns a server's authentication settings into transport options.
-//
-// The OAuth and token-command modes are configured and validated but not yet
-// implemented; they are rejected by name so the message says what is missing
-// rather than failing later as an unexplained 401.
-func authOptions(srv *config.Server, name string) ([]transport.Option, error) {
-	switch mode := srv.AuthMode(); mode {
-	case config.AuthNone:
-		return nil, nil
-	case config.AuthStaticHeaders:
-		return []transport.Option{transport.WithHeaders(srv.Headers)}, nil
-	case config.AuthTokenCommand:
-		return nil, fmt.Errorf("server %q uses tokenCommand, which is not implemented yet", name)
-	case config.AuthOAuthConfigured, config.AuthOAuthDiscover:
-		return nil, fmt.Errorf("server %q uses OAuth, which is not implemented yet", name)
-	default:
-		return nil, fmt.Errorf("server %q: unknown authentication mode %q", name, mode)
-	}
 }

@@ -44,9 +44,6 @@ Run "mcp-bridge <command> --help" for the flags of a single command.
 // without printing a second diagnostic.
 var errUsage = errors.New("usage")
 
-// errNotImplemented marks the commands the OAuth phase still has to fill in.
-var errNotImplemented = errors.New("not implemented yet")
-
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		if !errors.Is(err, errUsage) {
@@ -138,8 +135,12 @@ func cmdLogin(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, _ = configPath, callbackPort
-	return fmt.Errorf("login %s: %w", name, errNotImplemented)
+	return cli.Login(cli.LoginOptions{
+		ConfigPath:   *configPath,
+		Server:       name,
+		CallbackPort: *callbackPort,
+		Out:          stdout,
+	})
 }
 
 func cmdLogout(args []string, stdout, stderr io.Writer) error {
@@ -148,8 +149,7 @@ func cmdLogout(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_ = configPath
-	return fmt.Errorf("logout %s: %w", name, errNotImplemented)
+	return cli.Logout(cli.LogoutOptions{ConfigPath: *configPath, Server: name, Out: stdout})
 }
 
 func cmdList(args []string, stdout, stderr io.Writer) error {
@@ -169,6 +169,10 @@ func cmdInspect(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_ = configPath
-	return fmt.Errorf("inspect %s: %w", name, errNotImplemented)
+	return cli.Inspect(cli.InspectOptions{
+		ConfigPath: *configPath,
+		Server:     name,
+		Out:        stdout,
+		Logs:       stderr,
+	})
 }

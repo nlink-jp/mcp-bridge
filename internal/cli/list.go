@@ -53,3 +53,9 @@ func loginState(srv *config.Server, name string) string {
 	}
 	return "logged in"
 }
+
+// fileExists reports whether a path is present.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}

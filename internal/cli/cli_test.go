@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/nlink-jp/mcp-bridge/internal/config"
+	"github.com/nlink-jp/mcp-bridge/internal/oauth"
 )
 
 // writeConfig places a config file in an isolated XDG_CONFIG_HOME and returns
@@ -161,31 +162,162 @@ func TestUnknownServerListsAlternatives(t *testing.T) {
 	}
 }
 
-// The unimplemented authentication modes must be rejected by name. Failing
-// later as an unexplained 401 would send the user hunting in the wrong place.
-func TestUnimplementedAuthModesAreNamed(t *testing.T) {
-	cases := []struct {
-		name, server, want string
-	}{
-		{
-			"oauth configured",
-			`{"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"}}`,
-			"OAuth",
-		},
-		{"oauth discover", `{"url":"https://e.example.com/mcp","oauth":{}}`, "OAuth"},
-		{"token command", `{"url":"https://e.example.com/mcp","tokenCommand":{"command":"gcloud"}}`, "tokenCommand"},
+// An OAuth server with no stored login must fail with the command that fixes
+// it, not with a missing-file error about a path the user never created.
+func TestOAuthWithoutLoginNamesTheLoginCommand(t *testing.T) {
+	cases := map[string]string{
+		"configured": `{"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"}}`,
+		"discover":   `{"url":"https://e.example.com/mcp","oauth":{}}`,
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := writeConfig(t, `{"servers":{"s":`+tc.server+`}}`)
+	for name, server := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := writeConfig(t, `{"servers":{"s":`+server+`}}`)
 			err := Run(RunOptions{ConfigPath: cfg, Server: "s", In: strings.NewReader(""), Out: &bytes.Buffer{}, Logs: &bytes.Buffer{}})
 			if err == nil {
-				t.Fatal("an unimplemented auth mode was accepted")
+				t.Fatal("a server with no stored login was accepted")
 			}
-			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "not implemented") {
-				t.Errorf("error does not say what is missing: %v", err)
+			if !strings.Contains(err.Error(), "mcp-bridge login s") {
+				t.Errorf("error does not name the fix: %v", err)
 			}
 		})
+	}
+}
+
+// A stored login lets the session start, and the access token reaches the
+// server as a Bearer credential.
+func TestStoredLoginAuthenticatesTheSession(t *testing.T) {
+	srv, seen := mockMCP(t)
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"mock":{"url":%q,"oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"}}}}`, srv.URL))
+
+	tokensPath, err := config.TokensPath("mock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oauth.SaveTokens(tokensPath, &oauth.Tokens{AccessToken: "stored-token"}); err != nil {
+		t.Fatal(err)
+	}
+
+	bridgeSession(t, cfg, "mock", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`+"\n")
+
+	headers := seen()
+	if len(headers) == 0 {
+		t.Fatal("the server was never called")
+	}
+	if got := headers[0].Get("Authorization"); got != "Bearer stored-token" {
+		t.Errorf("Authorization = %q, want the stored access token", got)
+	}
+}
+
+// tokenCommand runs the user's own credential tool and sends its output.
+func TestTokenCommandSuppliesTheBearerToken(t *testing.T) {
+	srv, seen := mockMCP(t)
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"mock":{"url":%q,"tokenCommand":{"command":"printf","args":["ya29.from-command"]}}}}`, srv.URL))
+
+	bridgeSession(t, cfg, "mock", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`+"\n")
+
+	headers := seen()
+	if len(headers) == 0 {
+		t.Fatal("the server was never called")
+	}
+	if got := headers[0].Get("Authorization"); got != "Bearer ya29.from-command" {
+		t.Errorf("Authorization = %q, want the token the command printed", got)
+	}
+}
+
+// Logging in to a server that does not use OAuth would open a browser for
+// nothing, so it is refused with the reason.
+func TestLoginRefusesNonOAuthServers(t *testing.T) {
+	cfg := writeConfig(t, `{"servers":{"plain":{"url":"https://e.example.com/mcp"}}}`)
+	err := Login(LoginOptions{ConfigPath: cfg, Server: "plain", Out: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("a login was started for a server with no OAuth")
+	}
+	if !strings.Contains(err.Error(), "does not use OAuth") {
+		t.Errorf("unclear error: %v", err)
+	}
+}
+
+func TestLogoutRemovesTheStoredTokens(t *testing.T) {
+	cfg := writeConfig(t, `{"servers":{"slack":{"url":"https://mcp.slack.com/mcp","oauth":{}}}}`)
+	tokensPath, err := config.TokensPath("slack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oauth.SaveTokens(tokensPath, &oauth.Tokens{AccessToken: "x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Logout(LogoutOptions{ConfigPath: cfg, Server: "slack", Out: &out}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tokensPath); !os.IsNotExist(err) {
+		t.Error("the token file survived logout")
+	}
+	if !strings.Contains(out.String(), "Logged out") {
+		t.Errorf("logout said nothing useful: %q", out.String())
+	}
+
+	// Logging out twice is not an error, and says so plainly.
+	out.Reset()
+	if err := Logout(LogoutOptions{ConfigPath: cfg, Server: "slack", Out: &out}); err != nil {
+		t.Errorf("second logout failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "nothing to do") {
+		t.Errorf("a second logout was not reported clearly: %q", out.String())
+	}
+}
+
+// The discovery cache holds the client registered with the provider, not the
+// user's credentials. Deleting it would create a second client record at the
+// next login for no benefit.
+func TestLogoutKeepsTheDiscoveryCache(t *testing.T) {
+	cfg := writeConfig(t, `{"servers":{"slack":{"url":"https://mcp.slack.com/mcp","oauth":{}}}}`)
+	tokensPath, _ := config.TokensPath("slack")
+	discoveryPath, _ := config.DiscoveryPath("slack")
+	if err := oauth.SaveTokens(tokensPath, &oauth.Tokens{AccessToken: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(discoveryPath, []byte(`{"client_id":"registered"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Logout(LogoutOptions{ConfigPath: cfg, Server: "slack", Out: &bytes.Buffer{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(discoveryPath); err != nil {
+		t.Errorf("the discovery cache was deleted by logout: %v", err)
+	}
+}
+
+func TestInspectReportsServerAndTools(t *testing.T) {
+	srv, _ := mockMCP(t)
+	cfg := writeConfig(t, fmt.Sprintf(`{"servers":{"mock":{"url":%q}}}`, srv.URL))
+
+	var out bytes.Buffer
+	if err := Inspect(InspectOptions{ConfigPath: cfg, Server: "mock", Out: &out, Logs: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"mock", "2025-06-18", "1 tool(s)", "echo"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("inspect output is missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// Inspect is the command that answers "is my configuration right?", so its
+// authentication failures must carry the fix.
+func TestInspectSurfacesAuthenticationProblems(t *testing.T) {
+	cfg := writeConfig(t, `{"servers":{"slack":{"url":"https://mcp.slack.com/mcp","oauth":{}}}}`)
+	err := Inspect(InspectOptions{ConfigPath: cfg, Server: "slack", Out: &bytes.Buffer{}, Logs: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("inspect succeeded with no stored login")
+	}
+	if !strings.Contains(err.Error(), "mcp-bridge login slack") {
+		t.Errorf("error does not name the fix: %v", err)
 	}
 }
 

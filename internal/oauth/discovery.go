@@ -334,8 +334,15 @@ func quotedParam(header, name string) string {
 	return header[start : start+end]
 }
 
-// loadDiscovery reads the cache. A missing or unreadable cache is simply an
-// absent one: discovery runs again.
+// LoadDiscovered reads the discovery cache. A missing or unreadable cache is
+// simply an absent one, and the second return value says so; discovery runs
+// again in that case.
+//
+// A session started with `"oauth": {}` has no endpoints in its config, so this
+// is where it finds the ones the login recorded.
+func LoadDiscovered(path string) (*Discovered, bool) { return loadDiscovery(path) }
+
+// loadDiscovery reads the cache.
 func loadDiscovery(path string) (*Discovered, bool) {
 	if path == "" {
 		return nil, false
