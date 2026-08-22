@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -502,5 +503,38 @@ func TestAuthorizeURLPreservesExistingQuery(t *testing.T) {
 	}
 	if parsed.Query().Get("response_type") != "code" {
 		t.Errorf("response_type missing: %s", got)
+	}
+}
+
+// With a self-signed callback certificate the browser's first connection
+// always fails the handshake — that failure is what produces the warning the
+// user clicks through. The standard logger must not print it, because on every
+// successful https login it reads as a failure.
+func TestRejectedTLSHandshakeIsNotLogged(t *testing.T) {
+	var logged bytes.Buffer
+	original := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(original) })
+
+	cb, err := startCallbackServer(Settings{CallbackScheme: "https"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cb.close()
+
+	// A client that refuses the self-signed certificate, exactly as a browser
+	// does before the user accepts it.
+	strict := &http.Client{Timeout: 5 * time.Second}
+	resp, err := strict.Get(cb.redirectURI)
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("the self-signed certificate was accepted; this test proves nothing")
+	}
+
+	// Give the server a moment to notice and (not) log the failure.
+	time.Sleep(100 * time.Millisecond)
+
+	if strings.Contains(logged.String(), "TLS handshake error") {
+		t.Errorf("a successful login would print this alarming line:\n%s", logged.String())
 	}
 }

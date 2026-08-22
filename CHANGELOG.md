@@ -55,6 +55,11 @@ remains before a release is packaging and a run against a live provider.
   describes the after-effect and sends the reader looking for an empty token
   file. Both the 401 and the login command now survive into the message.
   Found by running against the live Slack MCP server with a revoked token.
+- The OAuth callback server no longer prints `http: TLS handshake error ...
+  tls: bad certificate` on every successful https login. That handshake
+  failure is the browser's first connection being refused — the very thing
+  that produces the warning the user clicks through — so it was guaranteed
+  noise that read as a failure. Found during a live Slack login.
 
 - RFP (Phase 1 planning) in `docs/{en,ja}/`, fixing the final shape before
   implementation: scope limited to providers without RFC 7591 Dynamic Client

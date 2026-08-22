@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -234,7 +235,20 @@ func startCallbackServer(s Settings, out io.Writer) (*callbackServer, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", cb.handle)
-	cb.server = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	cb.server = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		// Silence the server's own error log. With a self-signed callback
+		// certificate the browser's first connection always fails the
+		// handshake — that failure is what produces the warning the user then
+		// clicks through — and the standard logger would print
+		//
+		//   http: TLS handshake error from 127.0.0.1:...: tls: bad certificate
+		//
+		// on every successful https login, where it reads as a failure. The
+		// outcome of the flow is reported by Login itself, so nothing is lost.
+		ErrorLog: log.New(io.Discard, "", 0),
+	}
 	go func() { _ = cb.server.Serve(listener) }()
 
 	return cb, nil
