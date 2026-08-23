@@ -72,7 +72,29 @@ mcp-bridge list             # どのサーバがログイン済みかを表示�
 ```
 
 設定が正しいかを確かめる最短経路は `inspect` です。MCP クライアントに組み込む前に、
-接続・認証してサーバの自己申告を表示します。
+接続してサーバの自己申告を表示します。
+
+**初回ログインの前でも動きます。** 多くの MCP サーバは `initialize` と `tools/list` を
+資格情報なしで返し、`tools/call` でのみ認証を要求します。したがって OAuth アプリを
+設定している最中でも、URL・プロトコルバージョン・ツール一覧という実質的な情報が得られます。
+出力はどちらの視点を表示しているかを明示します:
+
+```
+  auth:       oauth (not logged in)
+              showing what the server returns without a credential
+```
+
+資格情報を送った場合は、**それで何かが証明されたのか**も報告します。誰にでも答えるサーバでは
+トークンについて何も分からないので、ログインが機能しているかのように書かずにそう述べます:
+
+```
+  auth:       oauth (credential presented)
+              the server answers these calls without a credential too,
+              so this does not confirm the credential works
+```
+
+`auth: oauth (credential accepted)` とだけ出た場合は、サーバが実際に資格情報を要求し、
+それが受理されたという意味です。
 
 ## 設定
 

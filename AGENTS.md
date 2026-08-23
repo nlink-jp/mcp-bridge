@@ -58,6 +58,11 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
 
 ## Gotchas
 
+- **`inspect` tolerates a missing login; `run` does not.** The split is
+  deliberate: `inspect` exists to check a configuration before the login has
+  happened, while `run` is launched by an MCP client that cannot show a
+  per-request failure legibly. `buildTransportOptions`'s `allowMissingLogin`
+  flag is what separates them.
 - **stdout is reserved for JSON-RPC.** Any other write breaks the MCP
   connection. All diagnostics go to stderr. `run()` takes injected writers so
   tests never touch the real streams.

@@ -12,33 +12,73 @@ import (
 
 // transportOptions turns a server's authentication settings into the options
 // the transport needs to authenticate every request.
+//
+// A missing OAuth login is an error here. run uses this: an MCP client that
+// launches the bridge cannot surface a per-request failure as legibly as a
+// terminal can, so refusing to start with the login command named is kinder
+// than a session where every call fails.
 func transportOptions(srv *config.Server, name string, logs io.Writer) ([]transport.Option, error) {
-	switch srv.AuthMode() {
+	opts, _, err := buildTransportOptions(srv, name, logs, false)
+	return opts, err
+}
+
+// credential describes what the connection will present, for reporting.
+type credential struct {
+	mode config.AuthMode
+	// presented is false when nothing will be sent: either none is configured,
+	// or an OAuth login is missing and the caller allowed that.
+	presented bool
+	// why explains a false presented, in words meant for a user.
+	why string
+}
+
+// buildTransportOptions assembles the transport options and reports what will
+// be presented.
+//
+// When allowMissingLogin is set, a server with no stored login yields a
+// transport that sends no credential rather than an error. inspect uses this:
+// its whole job is answering "is this configuration right?", and before the
+// first login is exactly when that gets asked. Many MCP servers answer
+// initialize and tools/list unauthenticated — the Google Workspace servers do —
+// so there is real information to be had without a token.
+func buildTransportOptions(srv *config.Server, name string, logs io.Writer, allowMissingLogin bool) ([]transport.Option, credential, error) {
+	mode := srv.AuthMode()
+	switch mode {
 	case config.AuthNone:
-		return nil, nil
+		return nil, credential{mode: mode, why: "no credential is configured"}, nil
 
 	case config.AuthStaticHeaders:
-		return []transport.Option{transport.WithHeaders(srv.Headers)}, nil
+		return []transport.Option{transport.WithHeaders(srv.Headers)},
+			credential{mode: mode, presented: true}, nil
 
 	case config.AuthTokenCommand:
 		provider := tokencmd.New(srv.TokenCommand.Command, srv.TokenCommand.Args, 0)
 		return []transport.Option{
-			transport.WithTokenProvider(provider),
-			transport.WithHeaders(srv.Headers),
-		}, nil
+				transport.WithTokenProvider(provider),
+				transport.WithHeaders(srv.Headers),
+			},
+			credential{mode: mode, presented: true}, nil
 
 	case config.AuthOAuthConfigured, config.AuthOAuthDiscover:
 		provider, err := oauthProvider(srv, name, logs)
 		if err != nil {
-			return nil, err
+			if !allowMissingLogin {
+				return nil, credential{mode: mode}, err
+			}
+			var opts []transport.Option
+			if len(srv.Headers) > 0 {
+				opts = append(opts, transport.WithHeaders(srv.Headers))
+			}
+			return opts, credential{mode: mode, why: "not logged in"}, nil
 		}
 		return []transport.Option{
-			transport.WithTokenProvider(provider),
-			transport.WithHeaders(srv.Headers),
-		}, nil
+				transport.WithTokenProvider(provider),
+				transport.WithHeaders(srv.Headers),
+			},
+			credential{mode: mode, presented: true}, nil
 
 	default:
-		return nil, fmt.Errorf("server %q: unknown authentication mode", name)
+		return nil, credential{mode: mode}, fmt.Errorf("server %q: unknown authentication mode", name)
 	}
 }
 

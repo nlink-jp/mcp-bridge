@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `inspect` no longer requires a login. It is the command that answers "is my
+  configuration right?", and before the first login is exactly when that gets
+  asked; many MCP servers answer `initialize` and `tools/list` without a
+  credential and only require one for `tools/call`. It now connects anyway and
+  labels which view it is showing. When the server does demand a credential and
+  none exists, the error still names the login command. `run` is unchanged and
+  still refuses to start without one: an MCP client that launches the bridge
+  cannot surface a per-request failure as legibly as a terminal can.
+  ([#1](https://github.com/nlink-jp/mcp-bridge/issues/1))
+- `inspect` now reports whether a presented credential was actually tested. A
+  server that would have answered anyone proves nothing about a token, so the
+  output says so instead of implying the login works.
+
 ## [0.1.0] - 2026-08-23
 
 First release.

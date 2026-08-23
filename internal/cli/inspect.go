@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/nlink-jp/mcp-bridge/internal/config"
 	"github.com/nlink-jp/mcp-bridge/internal/jsonrpc"
 	"github.com/nlink-jp/mcp-bridge/internal/transport"
 )
@@ -25,16 +26,18 @@ type InspectOptions struct {
 // Inspect connects to a server and prints what it says it is and what tools it
 // offers.
 //
-// This is the command that answers "is my configuration right?" without
-// wiring the bridge into an MCP client first, so its failures are the useful
-// output: an authentication problem surfaces here with the login command
-// attached rather than as a client that silently shows no tools.
+// This is the command that answers "is my configuration right?" without wiring
+// the bridge into an MCP client first, and before the first login is exactly
+// when that gets asked — so a missing OAuth login does not stop it. Many MCP
+// servers answer initialize and tools/list without a credential, and what they
+// say confirms the URL, the protocol and the tool list regardless of whether
+// the login has happened yet.
 func Inspect(opts InspectOptions) error {
 	srv, err := loadServer(opts.ConfigPath, opts.Server)
 	if err != nil {
 		return err
 	}
-	transportOpts, err := transportOptions(srv, opts.Server, opts.Logs)
+	transportOpts, cred, err := buildTransportOptions(srv, opts.Server, opts.Logs, true)
 	if err != nil {
 		return err
 	}
@@ -50,6 +53,10 @@ func Inspect(opts InspectOptions) error {
 		"clientInfo":      map[string]any{"name": "mcp-bridge", "version": "inspect"},
 	})
 	if err != nil {
+		if !cred.presented && cred.mode != config.AuthNone {
+			// The server did want a credential, and there is none to send.
+			return fmt.Errorf("%w\n(the server requires authentication; run \"mcp-bridge login %s\")", err, opts.Server)
+		}
 		return err
 	}
 
@@ -66,7 +73,9 @@ func Inspect(opts InspectOptions) error {
 	fmt.Fprintf(opts.Out, "%s\n", srv.URL)
 	fmt.Fprintf(opts.Out, "  server:     %s %s\n", orUnknown(info.ServerInfo.Name), info.ServerInfo.Version)
 	fmt.Fprintf(opts.Out, "  protocol:   %s\n", orUnknown(info.ProtocolVersion))
-	fmt.Fprintf(opts.Out, "  auth:       %s\n", srv.AuthMode())
+	for _, line := range authLines(srv.URL, cred) {
+		fmt.Fprintln(opts.Out, line)
+	}
 
 	// The specification requires this notification after initialize; some
 	// servers reject later requests without it.
@@ -168,4 +177,55 @@ func firstLine(s string) string {
 		}
 	}
 	return s
+}
+
+// authLines describes how the connection was authenticated.
+//
+// A successful inspect with a credential attached does not, on its own, mean
+// the credential works: a server that answers initialize to anyone would have
+// produced the same output with no token at all. One unauthenticated probe
+// settles which of the two happened, and saying so is the difference between
+// "your login works" and "nothing here tested your login".
+func authLines(url string, cred credential) []string {
+	const label = "  auth:       "
+	const indent = "              "
+
+	switch {
+	case cred.mode == config.AuthNone:
+		return []string{label + string(cred.mode)}
+
+	case !cred.presented:
+		return []string{
+			fmt.Sprintf("%s%s (%s)", label, cred.mode, cred.why),
+			indent + "showing what the server returns without a credential",
+		}
+
+	case serverAnswersUnauthenticated(url):
+		return []string{
+			fmt.Sprintf("%s%s (credential presented)", label, cred.mode),
+			indent + "the server answers these calls without a credential too,",
+			indent + "so this does not confirm the credential works",
+		}
+
+	default:
+		return []string{fmt.Sprintf("%s%s (credential accepted)", label, cred.mode)}
+	}
+}
+
+// serverAnswersUnauthenticated reports whether the server completes initialize
+// with no credential at all. A failure to probe answers false: the point is to
+// avoid overclaiming, and an inconclusive probe is not evidence.
+func serverAnswersUnauthenticated(url string) bool {
+	bare, err := transport.NewHTTP(url)
+	if err != nil {
+		return false
+	}
+	defer bare.Close()
+
+	_, err = call(bare, 1, "initialize", map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "mcp-bridge", "version": "inspect-probe"},
+	})
+	return err == nil
 }

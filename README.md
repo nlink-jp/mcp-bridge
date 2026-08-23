@@ -76,8 +76,32 @@ mcp-bridge list             # shows which servers are logged in
 ```
 
 `inspect` is the quickest way to tell whether a configuration is right: it
-connects, authenticates, and prints what the server says it is, without
-wiring the bridge into an MCP client first.
+connects and prints what the server says it is, without wiring the bridge into
+an MCP client first.
+
+It works **before** the first login. Many MCP servers answer `initialize` and
+`tools/list` without a credential and only require one for `tools/call`, so
+there is real information to be had — the URL, the protocol version, the tool
+list — while the OAuth app is still being set up. The output says which view it
+is showing:
+
+```
+  auth:       oauth (not logged in)
+              showing what the server returns without a credential
+```
+
+And when a credential *is* sent, `inspect` reports whether that proved
+anything. A server that would have answered anyone teaches you nothing about
+your token, so it says so rather than implying the login works:
+
+```
+  auth:       oauth (credential presented)
+              the server answers these calls without a credential too,
+              so this does not confirm the credential works
+```
+
+A plain `auth: oauth (credential accepted)` means the server did demand the
+credential and took it.
 
 ## Configuration
 

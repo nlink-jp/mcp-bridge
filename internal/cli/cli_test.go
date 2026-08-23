@@ -308,15 +308,137 @@ func TestInspectReportsServerAndTools(t *testing.T) {
 	}
 }
 
-// Inspect is the command that answers "is my configuration right?", so its
-// authentication failures must carry the fix.
-func TestInspectSurfacesAuthenticationProblems(t *testing.T) {
-	cfg := writeConfig(t, `{"servers":{"slack":{"url":"https://mcp.slack.com/mcp","oauth":{}}}}`)
-	err := Inspect(InspectOptions{ConfigPath: cfg, Server: "slack", Out: &bytes.Buffer{}, Logs: &bytes.Buffer{}})
-	if err == nil {
-		t.Fatal("inspect succeeded with no stored login")
+// inspect is asked "is my configuration right?" before the first login, so a
+// server that answers without a credential must still be inspectable. The
+// Google Workspace MCP servers behave exactly this way: initialize and
+// tools/list need no token, only tools/call does.
+func TestInspectWorksBeforeLoginWhenTheServerAllowsIt(t *testing.T) {
+	srv, _ := mockMCP(t)
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"mock":{"url":%q,"oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"}}}}`, srv.URL))
+
+	var out bytes.Buffer
+	if err := Inspect(InspectOptions{ConfigPath: cfg, Server: "mock", Out: &out, Logs: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("inspect refused to run before a login: %v", err)
 	}
-	if !strings.Contains(err.Error(), "mcp-bridge login slack") {
+	text := out.String()
+	if !strings.Contains(text, "1 tool(s)") || !strings.Contains(text, "echo") {
+		t.Errorf("the tool list was not reported:\n%s", text)
+	}
+	// The output must not let the reader mistake this for a working login.
+	if !strings.Contains(text, "not logged in") {
+		t.Errorf("the unauthenticated view was not labelled:\n%s", text)
+	}
+	if !strings.Contains(text, "without a credential") {
+		t.Errorf("the output does not say what it is showing:\n%s", text)
+	}
+}
+
+// When the server does demand a credential and none exists, the error must
+// still carry the login command — that was the whole value of the old
+// behaviour and it must survive.
+func TestInspectWithoutLoginNamesTheFixWhenTheServerRequiresAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"locked":{"url":%q,"oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"}}}}`, srv.URL))
+
+	err := Inspect(InspectOptions{ConfigPath: cfg, Server: "locked", Out: &bytes.Buffer{}, Logs: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("inspect reported success against a server that refused it")
+	}
+	if !strings.Contains(err.Error(), "mcp-bridge login locked") {
+		t.Errorf("error does not name the fix: %v", err)
+	}
+}
+
+// A credential reaching a server that would have answered anyway proves
+// nothing about the credential. Saying "accepted" there would be a lie.
+func TestInspectDoesNotClaimAnUntestedCredentialWorks(t *testing.T) {
+	srv, _ := mockMCP(t) // answers initialize to anyone
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"mock":{"url":%q,"oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"}}}}`, srv.URL))
+
+	tokensPath, err := config.TokensPath("mock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oauth.SaveTokens(tokensPath, &oauth.Tokens{AccessToken: "stored-token"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Inspect(InspectOptions{ConfigPath: cfg, Server: "mock", Out: &out, Logs: &bytes.Buffer{}}); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "credential presented") {
+		t.Errorf("the credential was not reported:\n%s", text)
+	}
+	if !strings.Contains(text, "does not confirm") {
+		t.Errorf("inspect overclaimed on an untested credential:\n%s", text)
+	}
+	if strings.Contains(text, "credential accepted") {
+		t.Errorf("inspect claimed acceptance it did not test:\n%s", text)
+	}
+}
+
+// When the server does require the credential, a successful inspect proves it
+// works, and should say so plainly.
+func TestInspectConfirmsACredentialTheServerRequired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer stored-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		_ = json.Unmarshal(body, &msg)
+		w.Header().Set("Content-Type", "application/json")
+		switch msg.Method {
+		case "initialize":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"locked","version":"1"}}}`, msg.ID)
+		default:
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}`, msg.ID)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"locked":{"url":%q,"oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"}}}}`, srv.URL))
+	tokensPath, _ := config.TokensPath("locked")
+	if err := oauth.SaveTokens(tokensPath, &oauth.Tokens{AccessToken: "stored-token"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Inspect(InspectOptions{ConfigPath: cfg, Server: "locked", Out: &out, Logs: &bytes.Buffer{}}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "credential accepted") {
+		t.Errorf("a credential the server demanded was not confirmed:\n%s", out.String())
+	}
+}
+
+// run keeps failing fast: an MCP client that launches the bridge cannot show a
+// per-request error as legibly as a terminal can, so refusing to start with the
+// login command named stays the right behaviour there.
+func TestRunStillRefusesToStartWithoutALogin(t *testing.T) {
+	srv, _ := mockMCP(t)
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"mock":{"url":%q,"oauth":{}}}}`, srv.URL))
+
+	err := Run(RunOptions{ConfigPath: cfg, Server: "mock", In: strings.NewReader(""), Out: &bytes.Buffer{}, Logs: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("run started without a login")
+	}
+	if !strings.Contains(err.Error(), "mcp-bridge login mock") {
 		t.Errorf("error does not name the fix: %v", err)
 	}
 }
