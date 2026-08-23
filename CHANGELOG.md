@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] - 2026-08-23
 
 ### Changed
 
@@ -104,4 +104,5 @@ endpoint.
 - Out of scope by decision, not omission: governance gates, audit receipts,
   telemetry export, tool masking, and the client_credentials flow.
 
+[0.1.1]: https://github.com/nlink-jp/mcp-bridge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nlink-jp/mcp-bridge/releases/tag/v0.1.0
