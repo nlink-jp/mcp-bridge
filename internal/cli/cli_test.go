@@ -149,6 +149,29 @@ func TestStaticHeadersReachTheServer(t *testing.T) {
 	}
 }
 
+// Headers travel alongside a credential rather than replacing one. Only oauth
+// and tokenCommand are mutually exclusive; the GitHub MCP server takes its
+// tool-surface controls (X-MCP-Toolsets, X-MCP-Exclude-Tools) as request
+// headers, so they have to reach a server that is also authenticated.
+func TestHeadersAccompanyATokenCommand(t *testing.T) {
+	srv, seen := mockMCP(t)
+	cfg := writeConfig(t, fmt.Sprintf(
+		`{"servers":{"mock":{"url":%q,"headers":{"X-MCP-Exclude-Tools":"delete_file"},"tokenCommand":{"command":"printf","args":["cmd-token"]}}}}`, srv.URL))
+
+	bridgeSession(t, cfg, "mock", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`+"\n")
+
+	headers := seen()
+	if len(headers) == 0 {
+		t.Fatal("the server was never called")
+	}
+	if got := headers[0].Get("Authorization"); got != "Bearer cmd-token" {
+		t.Errorf("Authorization = %q, want the token command's output", got)
+	}
+	if got := headers[0].Get("X-MCP-Exclude-Tools"); got != "delete_file" {
+		t.Errorf("X-MCP-Exclude-Tools = %q, want the configured header", got)
+	}
+}
+
 // A server the client asks for but the config does not define is the common
 // typo. The error lists what is configured, because that is the fix.
 func TestUnknownServerListsAlternatives(t *testing.T) {
