@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **GitHub setup guide** (`docs/{en,ja}/reference/github-setup.md`). GitHub
+  publishes RFC 9728 protected-resource metadata but its authorization server
+  has no `registration_endpoint`, so `"oauth": {}` can never complete against
+  it — the guide shows that evidence and the two routes that do work: a
+  `tokenCommand` borrowing an existing GitHub CLI login (verified against the
+  live server on 2026-08-30) and a pre-registered OAuth App (documented from
+  published metadata, not exercised end to end). It also covers limiting the
+  tool surface through the server's own request headers, with measured
+  `tools/list` sizes, and records that no tool in the server deletes a
+  repository.
+
+### Changed
+
+- The README now states that `headers` is **additive**: it accompanies `oauth`
+  or `tokenCommand` rather than replacing them, and only those two are mutually
+  exclusive. The behaviour is unchanged and was always the case, but the
+  authentication table read as a list of alternatives, which made the GitHub
+  tool-surface headers look impossible to combine with a credential.
+  `TestHeadersAccompanyATokenCommand` now pins it.
+
 ## [0.1.1] - 2026-08-23
 
 ### Changed

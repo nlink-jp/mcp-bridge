@@ -3,8 +3,9 @@
 stdio しか話せない MCP クライアントから、**事前登録済み OAuth クライアント**を要求する
 Streamable HTTP MCP サーバへ接続するためのブリッジ。
 
-> 実 Slack MCP サーバで検証済み。GitHub Apps と Microsoft Entra ID は同じ形をとるため
-> 動作すると考えられますが、実エンドポイントでは未検証です。
+> 実 Slack MCP サーバ（事前登録 OAuth）と実 GitHub MCP サーバ（token command）で
+> 検証済み。GitHub Apps と Microsoft Entra ID に対する事前登録 OAuth 経路は同じ形を
+> とるため動作すると考えられますが、実エンドポイントでは未検証です。
 
 ## 対象となる状況
 
@@ -19,6 +20,11 @@ mcp-bridge が埋めるのはその隙間 — **DCR に非対応**で、自分�
 **対象プロバイダの管理者権限が必要です。** 管理コンソールで OAuth アプリを作成し、
 スコープを宣言し、redirect URI を登録できる必要があります。それができない場合、
 このツールでは解決できません — 登録手順を迂回する方法はありません。
+
+この登録手順は OAuth 経路では回避できません。ただしサーバによっては、既に手元に
+あるトークンを受け付けます。その場合 `tokenCommand` で何も登録せずに供給できます —
+[GitHub セットアップ](docs/ja/reference/github-setup.ja.md) が両方の経路を並べて
+説明しています。
 
 ## 方向
 
@@ -146,6 +152,11 @@ typo は黙って無視されずにエラーになります。
 | `oauth`（フィールドあり） | 事前登録クライアントに対する OAuth2 authorization_code |
 | `oauth: {}` | エンドポイントとクライアントを自動 discovery（RFC 8414 + RFC 7591） |
 
+排他なのは `oauth` と `tokenCommand` の間だけです。`headers` は排他ではなく、
+どちらかを置き換えるのではなく併存します — オプションをリクエストヘッダで受け取る
+サーバ（GitHub MCP サーバの tool 露出制御など）に、認証済みの接続で到達するための
+経路です。`Authorization` という名前のヘッダはトークンを上書きします。
+
 トークンはサーバごとに `~/.config/mcp-bridge/state/<name>/tokens.json`（mode 0600）へ保存されます。
 
 ## MCP クライアントへの登録
@@ -205,6 +216,8 @@ mcp-bridge はサーバに拒否されるまでそのまま使います。ここ
 ## ドキュメント
 
 - [Slack セットアップ](docs/ja/reference/slack-setup.ja.md) — 全手順の実例。実サーバで検証済み
+- [GitHub セットアップ](docs/ja/reference/github-setup.ja.md) — GitHub に対して discovery が
+  成立しない理由、成立する2経路、tool 露出の絞り方
 - [設計判断](docs/ja/adr/) — OAuth 設定を明示的にした理由 (0001)、失敗したリクエストに
   必ず応答する理由 (0002)、refresh を持たないトークンに対処可能な期限が存在しない理由 (0003)、
   設定ファイルを strict decode の JSON 1本にした理由 (0004)

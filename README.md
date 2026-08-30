@@ -3,9 +3,10 @@
 Connect stdio-only MCP clients to Streamable HTTP MCP servers that require a
 **pre-registered OAuth client**.
 
-> Verified against the live Slack MCP server. GitHub Apps and Microsoft Entra
-> ID present the same shape and are expected to work, but have not been
-> exercised against a live endpoint.
+> Verified against the live Slack MCP server (pre-registered OAuth) and the
+> live GitHub MCP server (token command). The pre-registered OAuth route for
+> GitHub Apps and Microsoft Entra ID presents the same shape and is expected to
+> work, but has not been exercised against a live endpoint.
 
 ## Who this is for
 
@@ -22,6 +23,11 @@ MCP server, GitHub Apps, Microsoft Entra ID, and similar enterprise SaaS.
 create an OAuth app in its admin console, declare its scopes, and register a
 redirect URI. If you cannot do that, this tool will not help you — there is no
 way around the registration step.
+
+That registration step is unavoidable for the OAuth route. Some servers also
+accept a token you already hold, which `tokenCommand` can supply without
+registering anything — the [GitHub setup](docs/en/reference/github-setup.md)
+covers both routes side by side.
 
 ## Direction
 
@@ -153,6 +159,12 @@ Authentication is chosen by which key is present:
 | `oauth` with fields | OAuth2 authorization_code against a pre-registered client |
 | `oauth: {}` | OAuth2 with endpoints and client discovered automatically (RFC 8414 + RFC 7591) |
 
+`oauth` and `tokenCommand` are mutually exclusive. `headers` is not: it
+accompanies either of them rather than replacing them, which is how a server
+that takes options as request headers — the GitHub MCP server's tool-surface
+controls, for one — reaches a connection that is also authenticated. A header
+named `Authorization` overrides the token.
+
 Tokens are stored per server in `~/.config/mcp-bridge/state/<name>/tokens.json`
 with mode 0600.
 
@@ -218,6 +230,8 @@ reason. Where a refresh token exists, renewal is automatic.
 
 - [Slack setup](docs/en/reference/slack-setup.md) — a worked example of the
   whole flow, verified against the live server
+- [GitHub setup](docs/en/reference/github-setup.md) — why discovery cannot work
+  against GitHub, the two routes that do, and how to limit the tool surface
 - [Design decisions](docs/en/adr/) — why the OAuth settings are explicit
   (0001), why a failed request is always answered (0002), why a token with no
   refresh has no expiry we can act on (0003), and why there is one strictly

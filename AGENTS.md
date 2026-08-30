@@ -15,8 +15,10 @@ direction is not supported.
 - Module path: `github.com/nlink-jp/mcp-bridge`
 - Series: util-series
 - Language: Go, standard library only (`go.mod` has zero require lines)
-- Status: released. Verified against the live Slack MCP server; GitHub Apps and
-  Entra ID present the same shape but are untested against a live endpoint.
+- Status: released. Verified against the live Slack MCP server (pre-registered
+  OAuth) and the live GitHub MCP server (token command). The pre-registered
+  OAuth route for GitHub Apps and Entra ID presents the same shape but is
+  untested against a live endpoint.
 
 ## Build and test
 
@@ -46,7 +48,8 @@ internal/tokencmd/           Bearer tokens from an external command
 internal/cli/                Subcommand bodies (run, list, login, logout, inspect)
 scripts/docs-mirror-check.sh Verifies docs/en and docs/ja are structural mirrors
 docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
-                             currently holds the RFP
+                             holds the RFP, four ADRs, and the Slack and
+                             GitHub setup guides under reference/
 ```
 
 ## Runtime layout
@@ -76,6 +79,14 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
   `TestEveryDocumentedCommandIsDispatchable`. `dispatchedCommands` in
   `main_test.go` must be updated alongside the switch. This is deliberate: the
   predecessor shipped `--inspect` and `--callback-port` documented nowhere.
+- **`headers` is additive, not an alternative.** Only `oauth` and
+  `tokenCommand` are mutually exclusive; `headers` accompanies either and is
+  applied *after* the token provider, so a header named `Authorization`
+  overrides it. Servers that take options as request headers depend on this —
+  the GitHub MCP server's `X-MCP-Toolsets` / `X-MCP-Exclude-Tools` reach an
+  authenticated connection that way. `TestHeadersAccompanyATokenCommand` pins
+  it; the authentication table in the README reads as exclusive at a glance,
+  which is why the note is there.
 - **Zero dependencies is a hard constraint**, not a preference. It is why config
   is JSON rather than the org-standard sectioned TOML.
 - **Scope is fixed by the RFP** in `docs/ja/mcp-bridge-rfp.ja.md`. Governance
