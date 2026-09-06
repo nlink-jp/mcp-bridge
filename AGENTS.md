@@ -26,6 +26,7 @@ direction is not supported.
 make build        # -> dist/mcp-bridge
 make build-all    # cross-compiled binaries -> dist/
 make test         # go test ./...
+make test-linux   # same suite on Linux (container)
 make lint         # go vet + gofmt check
 make check        # lint + test + docs-mirror-check
 make clean        # rm -rf dist/
