@@ -30,7 +30,7 @@ make test-linux   # same suite on Linux (container)
 make lint         # go vet + gofmt check
 make check        # lint + test + docs-mirror-check
 make clean        # rm -rf dist/
-make verify-release  # gate: .notarized marker + freshness (run before upload)
+make verify-release  # gate: notarized, fresh, runs at this version, clean linux archives (run before upload)
 ```
 
 Never run `go build` directly — it drops a binary in the project root.
