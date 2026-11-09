@@ -5,22 +5,40 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
+	"net/http"
 	"strings"
 )
+
+// maxRedirects matches the limit net/http applies when CheckRedirect is unset.
+const maxRedirects = 10
 
 // WithPinnedCert accepts exactly the certificate whose SHA-256 is sum, in place
 // of the usual verification.
 func WithPinnedCert(sum []byte) Option {
-	return func(t *httpTransport) { t.client = defaultClient(pinnedTLSConfig(sum)) }
+	return func(t *httpTransport) {
+		t.client = defaultClient(pinnedTLSConfig(sum))
+		t.client.CheckRedirect = refuseRedirectOffHTTPS
+	}
+}
+
+// refuseRedirectOffHTTPS keeps a pinned connection on TLS. Go carries the
+// request's headers across a redirect to the same host whatever the scheme, so
+// following one to http would send the credential in the clear. A redirect to
+// another https server needs no rule here: it fails the pin.
+func refuseRedirectOffHTTPS(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing a redirect to %s: a connection pinned by tlsCertSha256 stays on https", req.URL.Redacted())
+	}
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	return nil
 }
 
 // pinnedTLSConfig compares the presented certificate with the pin and does
 // nothing else. Issuer, host name and validity are left unchecked on purpose:
 // the devices this serves fail those checks by construction, and an exact match
 // on the certificate already says what they would have said.
-//
-// VerifyConnection rather than VerifyPeerCertificate, because the latter is
-// skipped on a resumed session.
 func pinnedTLSConfig(sum []byte) *tls.Config {
 	return &tls.Config{
 		InsecureSkipVerify: true, //nolint:gosec // replaced by the pin check below

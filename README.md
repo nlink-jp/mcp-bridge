@@ -195,7 +195,8 @@ openssl s_client -connect kvm.example.internal:443 </dev/null 2>/dev/null | open
 
 It is hex, with or without colons, in either case. The bridge then accepts that
 exact certificate and no other. Issuer, host name and expiry are not checked. A
-different certificate stops the connection before any header or token is sent.
+different certificate stops the connection before any header or token is sent,
+and a redirect to anything but `https` is refused.
 
 When a device regenerates its certificate, the error shows the new fingerprint.
 Make sure the change was yours, then replace the value.

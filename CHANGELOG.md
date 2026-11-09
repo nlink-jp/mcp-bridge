@@ -31,8 +31,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   often serve a self-signed certificate issued to `localhost`, which usual
   verification refuses and an extra CA cannot repair. With the key set, that
   exact certificate is accepted in place of verification, and any other stops
-  the connection before a header or token is sent. It needs an `https` URL and
-  cannot be combined with `oauth`. See ADR-0005.
+  the connection before a header or token is sent. A pinned connection refuses
+  a redirect to anything but `https`. It needs an `https` URL and cannot be
+  combined with `oauth`. See ADR-0005.
 - **GitHub setup guide** (`docs/{en,ja}/reference/github-setup.md`). GitHub
   publishes RFC 9728 protected-resource metadata but its authorization server
   has no `registration_endpoint`, so `"oauth": {}` can never complete against

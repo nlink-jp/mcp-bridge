@@ -42,8 +42,12 @@ certificate past its expiry date therefore keeps working.
 **A mismatch stops the connection during the TLS handshake**, before any request
 is sent, so a header or token never reaches an impostor. The error shows the
 fingerprint presented and the one configured, because replacing the value is the
-fix when the certificate was regenerated on purpose. The check runs on every
-connection, including a resumed session.
+fix when the certificate was regenerated on purpose.
+
+**A redirect off `https` is refused.** Go keeps a request's headers across a
+redirect to the same host whatever the scheme, so a device misconfigured to
+redirect to `http` would otherwise receive the credential in the clear. A
+redirect to another `https` server needs no rule, since it fails the pin.
 
 **The key applies to every connection a command makes to the MCP endpoint**:
 `run`, `inspect`, and the unauthenticated probe inside `inspect`. Without the
@@ -70,6 +74,13 @@ silently do nothing somewhere (ADR-0004):
 - A version of mcp-bridge older than this one rejects the key as unknown and
   stops loading the whole file (ADR-0004), so the upgrade comes before the
   configuration change.
+- With `HTTPS_PROXY` pointing at an `https://` proxy, the proxy's own certificate
+  is compared with the pin and the connection fails. It fails closed, and a
+  device on a local network has no reason to sit behind such a proxy, so this is
+  accepted rather than handled. An `http://` proxy tunnels TLS and is unaffected.
+- An empty `"tlsCertSha256": ""` counts as absent. Usual verification applies, so
+  a device that needs the pin still fails visibly; telling the two apart is not
+  worth a second representation of the field.
 - The transport keeps using HTTP/1.1. It already did, because a custom dialer
   turns off automatic HTTP/2 in Go; setting a TLS configuration changes nothing
   here.
