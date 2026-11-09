@@ -42,6 +42,23 @@ type credential struct {
 // initialize and tools/list unauthenticated — the Google Workspace servers do —
 // so there is real information to be had without a token.
 func buildTransportOptions(srv *config.Server, name string, logs io.Writer, allowMissingLogin bool) ([]transport.Option, credential, error) {
+	opts, cred, err := authOptions(srv, name, logs, allowMissingLogin)
+	return append(opts, connectionOptions(srv)...), cred, err
+}
+
+// connectionOptions holds what every connection to the server needs whether or
+// not it carries a credential, so that inspect's unauthenticated probe reaches
+// the server the same way the session does.
+func connectionOptions(srv *config.Server) []transport.Option {
+	if sum := srv.PinnedCertSHA256(); sum != nil {
+		return []transport.Option{transport.WithPinnedCert(sum)}
+	}
+	return nil
+}
+
+// authOptions turns the server's authentication settings into transport
+// options.
+func authOptions(srv *config.Server, name string, logs io.Writer, allowMissingLogin bool) ([]transport.Option, credential, error) {
 	mode := srv.AuthMode()
 	switch mode {
 	case config.AuthNone:

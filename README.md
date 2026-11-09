@@ -168,6 +168,42 @@ named `Authorization` overrides the token.
 Tokens are stored per server in `~/.config/mcp-bridge/state/<name>/tokens.json`
 with mode 0600.
 
+### Devices with a self-signed certificate
+
+Devices on a local network often serve HTTPS with a self-signed certificate,
+frequently issued to `localhost` rather than the name you reach them by. Usual
+verification refuses those, and trusting an extra CA would not fix the name.
+Pin the certificate with `tlsCertSha256` instead:
+
+```json
+{
+  "servers": {
+    "device": {
+      "url": "https://kvm.example.internal/api/mcp",
+      "headers": { "Authorization": "Bearer <your-api-key>" },
+      "tlsCertSha256": "<fingerprint of the device's certificate>"
+    }
+  }
+}
+```
+
+Read the fingerprint over a network you trust, and paste the part after `=`:
+
+```bash
+openssl s_client -connect kvm.example.internal:443 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
+```
+
+It is hex, with or without colons, in either case. The bridge then accepts that
+exact certificate and no other. Issuer, host name and expiry are not checked. A
+different certificate stops the connection before any header or token is sent.
+
+When a device regenerates its certificate, the error shows the new fingerprint.
+Make sure the change was yours, then replace the value.
+
+`tlsCertSha256` needs an `https` URL and cannot be combined with `oauth`. Update
+mcp-bridge before adding the key: older versions reject it as unknown and stop
+reading the whole file.
+
 ## MCP client integration
 
 ```json
@@ -234,8 +270,9 @@ reason. Where a refresh token exists, renewal is automatic.
   against GitHub, the two routes that do, and how to limit the tool surface
 - [Design decisions](docs/en/adr/) — why the OAuth settings are explicit
   (0001), why a failed request is always answered (0002), why a token with no
-  refresh has no expiry we can act on (0003), and why there is one strictly
-  decoded JSON config file (0004)
+  refresh has no expiry we can act on (0003), why there is one strictly
+  decoded JSON config file (0004), and why a device's certificate is pinned
+  rather than left unverified (0005)
 - [RFP](docs/en/mcp-bridge-rfp.md) — the scope decision and what is
   deliberately out of it
 

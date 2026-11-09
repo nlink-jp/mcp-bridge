@@ -39,10 +39,16 @@ func writeConfig(t *testing.T, content string) string {
 // the Streamable HTTP transport and records the headers it was called with.
 func mockMCP(t *testing.T) (*httptest.Server, func() []http.Header) {
 	t.Helper()
+	return startMockMCP(t, httptest.NewServer)
+}
+
+// startMockMCP runs the mock on whichever kind of server start creates.
+func startMockMCP(t *testing.T, start func(http.Handler) *httptest.Server) (*httptest.Server, func() []http.Header) {
+	t.Helper()
 	var mu sync.Mutex
 	var headers []http.Header
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := start(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		headers = append(headers, r.Header.Clone())
 		mu.Unlock()

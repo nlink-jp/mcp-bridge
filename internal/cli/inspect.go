@@ -73,7 +73,7 @@ func Inspect(opts InspectOptions) error {
 	fmt.Fprintf(opts.Out, "%s\n", srv.URL)
 	fmt.Fprintf(opts.Out, "  server:     %s %s\n", orUnknown(info.ServerInfo.Name), info.ServerInfo.Version)
 	fmt.Fprintf(opts.Out, "  protocol:   %s\n", orUnknown(info.ProtocolVersion))
-	for _, line := range authLines(srv.URL, cred) {
+	for _, line := range authLines(srv, cred) {
 		fmt.Fprintln(opts.Out, line)
 	}
 
@@ -186,7 +186,7 @@ func firstLine(s string) string {
 // produced the same output with no token at all. One unauthenticated probe
 // settles which of the two happened, and saying so is the difference between
 // "your login works" and "nothing here tested your login".
-func authLines(url string, cred credential) []string {
+func authLines(srv *config.Server, cred credential) []string {
 	const label = "  auth:       "
 	const indent = "              "
 
@@ -200,7 +200,7 @@ func authLines(url string, cred credential) []string {
 			indent + "showing what the server returns without a credential",
 		}
 
-	case serverAnswersUnauthenticated(url):
+	case serverAnswersUnauthenticated(srv):
 		return []string{
 			fmt.Sprintf("%s%s (credential presented)", label, cred.mode),
 			indent + "the server answers these calls without a credential too,",
@@ -215,8 +215,8 @@ func authLines(url string, cred credential) []string {
 // serverAnswersUnauthenticated reports whether the server completes initialize
 // with no credential at all. A failure to probe answers false: the point is to
 // avoid overclaiming, and an inconclusive probe is not evidence.
-func serverAnswersUnauthenticated(url string) bool {
-	bare, err := transport.NewHTTP(url)
+func serverAnswersUnauthenticated(srv *config.Server) bool {
+	bare, err := transport.NewHTTP(srv.URL, connectionOptions(srv)...)
 	if err != nil {
 		return false
 	}

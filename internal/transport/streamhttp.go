@@ -3,6 +3,7 @@ package transport
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,7 +71,7 @@ func NewHTTP(endpoint string, opts ...Option) (Transport, error) {
 	}
 	t := &httpTransport{
 		endpoint: endpoint,
-		client:   defaultClient(),
+		client:   defaultClient(nil),
 		incoming: make(chan []byte, 64),
 		closed:   make(chan struct{}),
 	}
@@ -83,9 +84,11 @@ func NewHTTP(endpoint string, opts ...Option) (Transport, error) {
 // defaultClient bounds connection setup and the wait for response headers
 // without bounding the response body: an SSE stream stays open for the life of
 // the session, so a whole-request timeout would sever a healthy connection.
-func defaultClient() *http.Client {
+// A nil tlsConfig means Go's usual certificate verification.
+func defaultClient(tlsConfig *tls.Config) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
+			TLSClientConfig:       tlsConfig,
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			TLSHandshakeTimeout:   10 * time.Second,

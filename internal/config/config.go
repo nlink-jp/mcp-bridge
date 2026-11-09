@@ -9,6 +9,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -30,11 +32,40 @@ type File struct {
 // TokenCommand means an external command supplies a Bearer token, and OAuth
 // means the authorization_code flow. An OAuth block that is present but empty
 // (`"oauth": {}`) asks for endpoint and client discovery.
+//
+// TLSCertSHA256 pins the one certificate the server may present, in place of
+// the usual verification. It exists for devices on a local network whose
+// certificates cannot pass that verification (ADR-0005).
 type Server struct {
-	URL          string            `json:"url"`
-	Headers      map[string]string `json:"headers,omitempty"`
-	OAuth        *OAuth            `json:"oauth,omitempty"`
-	TokenCommand *TokenCommand     `json:"tokenCommand,omitempty"`
+	URL           string            `json:"url"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	OAuth         *OAuth            `json:"oauth,omitempty"`
+	TokenCommand  *TokenCommand     `json:"tokenCommand,omitempty"`
+	TLSCertSHA256 string            `json:"tlsCertSha256,omitempty"`
+}
+
+// ParseCertSHA256 decodes a certificate fingerprint written as hex, with or
+// without colons, in either case: the form openssl prints.
+func ParseCertSHA256(value string) ([]byte, error) {
+	sum, err := hex.DecodeString(strings.ReplaceAll(value, ":", ""))
+	if err != nil || len(sum) != sha256.Size {
+		return nil, fmt.Errorf("must be a SHA-256 fingerprint (64 hex digits, colons optional), got %q", value)
+	}
+	return sum, nil
+}
+
+// PinnedCertSHA256 returns the pinned digest, or nil when the server uses the
+// usual verification. Validate guarantees a configured value parses, and an
+// unusable one here would fall back to the stricter behaviour.
+func (s *Server) PinnedCertSHA256() []byte {
+	if s.TLSCertSHA256 == "" {
+		return nil
+	}
+	sum, err := ParseCertSHA256(s.TLSCertSHA256)
+	if err != nil {
+		return nil
+	}
+	return sum
 }
 
 // OAuth holds the authorization_code settings for a pre-registered client.
@@ -239,6 +270,18 @@ func (s *Server) problems(name string) []error {
 	for header := range s.Headers {
 		if header == "" {
 			add("headers contains an empty header name")
+		}
+	}
+
+	if s.TLSCertSHA256 != "" {
+		if _, err := ParseCertSHA256(s.TLSCertSHA256); err != nil {
+			add("tlsCertSha256 %v", err)
+		}
+		if u, err := url.Parse(s.URL); err == nil && u.Scheme == "http" {
+			add("tlsCertSha256 requires an https url: an http connection has no certificate to compare")
+		}
+		if s.OAuth != nil {
+			add("tlsCertSha256 cannot be combined with oauth: the login talks to endpoints the pin does not cover")
 		}
 	}
 

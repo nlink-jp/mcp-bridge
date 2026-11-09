@@ -49,7 +49,7 @@ internal/tokencmd/           Bearer tokens from an external command
 internal/cli/                Subcommand bodies (run, list, login, logout, inspect)
 scripts/docs-mirror-check.sh Verifies docs/en and docs/ja are structural mirrors
 docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
-                             holds the RFP, four ADRs, and the Slack and
+                             holds the RFP, five ADRs, and the Slack and
                              GitHub setup guides under reference/
 ```
 
@@ -80,6 +80,12 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
   `TestEveryDocumentedCommandIsDispatchable`. `dispatchedCommands` in
   `main_test.go` must be updated alongside the switch. This is deliberate: the
   predecessor shipped `--inspect` and `--callback-port` documented nowhere.
+- **`tlsCertSha256` replaces verification, it does not add to it.** The
+  `InsecureSkipVerify` in `internal/transport/certpin.go` is paired with a
+  `VerifyConnection` that requires an exact match; never set one without the
+  other. Anything that opens a connection to the MCP endpoint must take
+  `connectionOptions(srv)`, including `inspect`'s unauthenticated probe
+  (`TestInspectProbeUsesThePin`).
 - **`headers` is additive, not an alternative.** Only `oauth` and
   `tokenCommand` are mutually exclusive; `headers` accompanies either and is
   applied *after* the token provider, so a header named `Authorization`

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,53 @@ func loadErr(t *testing.T, content string) string {
 		t.Fatal("expected an error, got none")
 	}
 	return err.Error()
+}
+
+const pinHex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+// openssl prints colons and capitals; a value pasted from anywhere else may
+// have neither. They all name the same certificate.
+func TestPinAcceptsTheFormsAFingerprintComesIn(t *testing.T) {
+	colons := "00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF"
+	for _, value := range []string{colons, strings.ToLower(colons), pinHex, strings.ToUpper(pinHex)} {
+		f := mustLoad(t, `{"servers":{"s":{"url":"https://e.example.com/mcp","tlsCertSha256":"`+value+`"}}}`)
+		srv, _ := f.Server("s")
+		if got := hex.EncodeToString(srv.PinnedCertSHA256()); got != pinHex {
+			t.Errorf("%q decoded to %s", value, got)
+		}
+	}
+}
+
+func TestNoPinMeansUsualVerification(t *testing.T) {
+	f := mustLoad(t, `{"servers":{"s":{"url":"https://e.example.com/mcp"}}}`)
+	srv, _ := f.Server("s")
+	if got := srv.PinnedCertSHA256(); got != nil {
+		t.Errorf("PinnedCertSHA256 = %x, want nil", got)
+	}
+}
+
+func TestPinValidation(t *testing.T) {
+	cases := []struct {
+		name, server, want string
+	}{
+		{"too short", `"url":"https://e.example.com/mcp","tlsCertSha256":"95:1F"`, "must be a SHA-256 fingerprint"},
+		{"not hex", `"url":"https://e.example.com/mcp","tlsCertSha256":"` + strings.Repeat("z", 64) + `"`, "must be a SHA-256 fingerprint"},
+		{"algorithm prefix", `"url":"https://e.example.com/mcp","tlsCertSha256":"sha256:` + pinHex + `"`, "must be a SHA-256 fingerprint"},
+		{"http url", `"url":"http://e.example.com/mcp","tlsCertSha256":"` + pinHex + `"`, "requires an https url"},
+		{"with discovery oauth", `"url":"https://e.example.com/mcp","oauth":{},"tlsCertSha256":"` + pinHex + `"`, "cannot be combined with oauth"},
+		{
+			"with configured oauth",
+			`"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id"},"tlsCertSha256":"` + pinHex + `"`,
+			"cannot be combined with oauth",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := loadErr(t, `{"servers":{"s":{`+tc.server+`}}}`); !strings.Contains(msg, tc.want) {
+				t.Errorf("error %q does not contain %q", msg, tc.want)
+			}
+		})
+	}
 }
 
 func TestLoadMinimal(t *testing.T) {
