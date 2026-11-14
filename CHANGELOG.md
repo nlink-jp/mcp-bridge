@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `make package` runs `govulncheck ./...` first (`make vuln`) and stops on a
+  finding, so a release cannot be built past one.
+
 ## [0.2.0] - 2026-11-09
 
 ### Fixed
