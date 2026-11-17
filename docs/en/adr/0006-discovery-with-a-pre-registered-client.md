@@ -110,8 +110,10 @@ redirect URI.
 authorization server, and the scopes and their source. Against a server that
 cannot be exercised here, this is what lets a failure be diagnosed from the
 output a user pastes. The output and the errors carry text the server
-returned, so control characters are removed just before anything reaches the
-terminal.
+returned, so control characters and bidirectional controls are removed just
+before anything reaches the terminal. Newlines are kept, since the program's
+own messages have them: a server can break its own text across lines, and
+cannot reach back over what was already printed.
 
 **What is still not done.** The MCP specification or a related one asks for
 each of these, but doing it would either stop Entra ID from connecting or

@@ -22,6 +22,18 @@ func TestPrintable(t *testing.T) {
 		"c1 \u009b31m control":                  "c1 31m control",
 		"nul\x00byte and del\x7f":               "nulbyte and del",
 		"scope api://x/.default offline_access": "scope api://x/.default offline_access",
+
+		// A right-to-left override shows "https://good.example/" + "moc.live" as
+		// if the host ended in "evil.com"; the isolates and marks do the same
+		// work more quietly.
+		"https://good.example/\u202emoc.live":                 "https://good.example/moc.live",
+		"embed \u202a\u202b pop \u202c override \u202d\u202e": "embed  pop  override ",
+		"isolate \u2066\u2067\u2068 pop \u2069":               "isolate  pop ",
+		"marks \u200e\u200f\u061c":                            "marks ",
+		// A joiner is not a bidirectional control: the emoji stays whole.
+		"family \U0001F468\u200d\U0001F469\u200d\U0001F467": "family \U0001F468\u200d\U0001F469\u200d\U0001F467",
+		// Invalid UTF-8 becomes the replacement character, not raw bytes.
+		"bad \xff\xfe bytes": "bad \ufffd\ufffd bytes",
 	}
 	for in, want := range cases {
 		if got := Printable(in); got != want {

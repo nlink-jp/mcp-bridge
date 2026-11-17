@@ -45,8 +45,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   through `--callback-port` registers once more after the update.
 - **Text from a server reaches the terminal without its control characters.**
   The output of `login` and `inspect`, and the error a command ends with, can
-  quote what a server returned; control characters other than newline and tab
-  are removed as they are written.
+  quote what a server returned; control characters other than newline and tab,
+  and bidirectional controls, are removed as they are written.
 - **A session no longer pairs a stored client secret with a configured
   `clientId`.** The secret a dynamic registration left behind is sent only
   with the client ID stored beside it.
