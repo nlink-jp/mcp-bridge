@@ -28,6 +28,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Discovery requests the scopes the server asks for.** It read only the
+  authorization server's `scopes_supported`, which for an OpenID provider is
+  `openid profile email offline_access` and none of the API scopes an MCP
+  server needs. The order is now the MCP specification's — the `scope` in the
+  server's 401 challenge, then `scopes_supported` in its protected-resource
+  metadata — with the authorization server's list kept as the last step.
+  `offline_access` is added to scopes the server named when the authorization
+  server offers it, so that a refresh token is issued. For `"oauth": {}` this
+  changes the scopes requested from a server that names its own.
+- **Discovery looks for the server's metadata at the well-known locations**
+  when the 401 challenge does not say where it is, or the server does not
+  challenge at all: `/.well-known/oauth-protected-resource` with the server's
+  path, then at the root.
+- **Metadata that describes another resource stops the login.** A server's
+  protected-resource metadata is used only when its `resource` has the scheme,
+  host and port of the configured `url` and a path leading to it (RFC 9728
+  §3.3, with the official MCP SDK's leading-path rule). A document with no
+  `resource` is passed over.
 - **Discovery uses only `https` URLs, unless the configured `url` is `http`.**
   An `https` server could name an `http` authorization or token endpoint and
   the login would use it, sending the authorization code and the tokens in the

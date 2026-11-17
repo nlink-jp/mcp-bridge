@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -110,22 +111,24 @@ func discover(req discoveryRequest) (*Discovered, error) {
 	}
 	fmt.Fprintln(req.out, "Discovering the authorization server...")
 
-	meta, err := findAuthServer(req)
+	found, err := findAuthServer(req)
 	if err != nil {
 		return nil, err
 	}
+	meta := found.meta
 
 	clientID, clientSecret, err := registerClient(req, meta)
 	if err != nil {
 		return nil, err
 	}
 
+	scopes, _, _ := chooseScopes(found.challengeScopes, found.resourceScopes, meta.ScopesSupported)
 	discovered := &Discovered{
 		AuthorizeURL: meta.AuthorizationEndpoint,
 		TokenURL:     meta.TokenEndpoint,
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
-		Scopes:       meta.ScopesSupported,
+		Scopes:       scopes,
 		RedirectURI:  req.redirectURI,
 	}
 
@@ -149,92 +152,282 @@ type authServerMetadata struct {
 	ScopesSupported       []string `json:"scopes_supported"`
 }
 
-// findAuthServer locates the authorization server, in the order the MCP
-// specification prescribes and then by the conventional well-known paths.
+// located is what finding the authorization server yields: its metadata, and
+// the scopes the MCP server itself asked for on the way there.
+type located struct {
+	meta *authServerMetadata
+	// namedBy is the protected-resource metadata document that named the
+	// authorization server; empty when it was found on the server's own host.
+	namedBy         string
+	challengeScopes []string
+	resourceScopes  []string
+}
+
+// findAuthServer locates the authorization server in the order the MCP
+// specification (2025-11-25) prescribes, and then by the older convention.
 //
-// The specified route is: an unauthenticated request draws a 401 whose
-// WWW-Authenticate header points at the protected-resource metadata
-// (RFC 9728), which names the authorization server. Servers that skip that
-// still usually publish metadata at a well-known path on their own host, so
-// both are tried before giving up — and the error, when it comes, says the
-// manual configuration is the way forward rather than just reporting the last
-// HTTP failure.
-func findAuthServer(req discoveryRequest) (*authServerMetadata, error) {
+// The specified route: an unauthenticated request draws a 401 whose
+// WWW-Authenticate header points at the server's protected-resource metadata
+// (RFC 9728); a server that does not say where it is publishes it at a
+// well-known location; that document names the authorization server. Servers
+// that predate this publish authorization server metadata on their own host,
+// so that is tried last — and the error, when it comes, lists every attempt
+// rather than just the last HTTP failure.
+func findAuthServer(req discoveryRequest) (*located, error) {
 	var attempts []string
 
-	if resourceMetadataURL, err := probeForResourceMetadata(req); err == nil {
-		if authServerURL, err := fetchResourceMetadata(req, resourceMetadataURL); err == nil {
-			if meta, err := fetchAuthServerMetadata(req, authServerURL); err == nil {
-				return meta, nil
-			} else {
-				attempts = append(attempts, fmt.Sprintf("authorization server metadata at %s: %v", authServerURL, err))
-			}
-		} else {
-			attempts = append(attempts, fmt.Sprintf("protected resource metadata at %s: %v", resourceMetadataURL, err))
-		}
-	} else {
+	probe, err := probeChallenge(req)
+	if err != nil {
 		attempts = append(attempts, fmt.Sprintf("challenge from %s: %v", req.serverURL, err))
+	}
+
+	candidates := []string{probe.metadataURL}
+	if probe.metadataURL == "" {
+		if candidates, err = resourceMetadataURLs(req.serverURL); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, candidate := range candidates {
+		resource, err := fetchResourceMetadata(req, candidate)
+		if mismatch := (*resourceMismatchError)(nil); errors.As(err, &mismatch) {
+			// Metadata that describes some other resource is not a missing
+			// document to look past: the server is publishing something that
+			// disagrees with the URL it was reached at.
+			return nil, err
+		}
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("protected resource metadata at %s: %v", candidate, err))
+			continue
+		}
+		issuer := resource.AuthorizationServers[0]
+		meta, err := fetchAuthServerMetadata(req, issuer)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("authorization server metadata for %s (named by %s): %v", issuer, candidate, err))
+			break
+		}
+		return &located{
+			meta:            meta,
+			namedBy:         candidate,
+			challengeScopes: probe.scopes,
+			resourceScopes:  resource.ScopesSupported,
+		}, nil
 	}
 
 	origin, err := originOf(req.serverURL)
 	if err != nil {
 		return nil, err
 	}
-	if meta, err := fetchAuthServerMetadata(req, origin); err == nil {
-		return meta, nil
-	} else {
+	meta, err := fetchAuthServerMetadata(req, origin)
+	if err != nil {
 		attempts = append(attempts, fmt.Sprintf("well-known metadata on %s: %v", origin, err))
+		return nil, fmt.Errorf("could not discover the authorization server. "+
+			"If this provider does not publish OAuth metadata, register an OAuth app with it and configure "+
+			"oauth.authorizeUrl, oauth.tokenUrl, oauth.clientId and oauth.clientSecret explicitly.\nTried:\n  - %s",
+			strings.Join(attempts, "\n  - "))
 	}
-
-	return nil, fmt.Errorf("could not discover the authorization server. "+
-		"If this provider does not publish OAuth metadata, register an OAuth app with it and configure "+
-		"oauth.authorizeUrl, oauth.tokenUrl, oauth.clientId and oauth.clientSecret explicitly.\nTried:\n  - %s",
-		strings.Join(attempts, "\n  - "))
+	return &located{meta: meta, challengeScopes: probe.scopes}, nil
 }
 
-// probeForResourceMetadata makes an unauthenticated request and reads the
-// resource_metadata pointer out of the 401 challenge.
-func probeForResourceMetadata(req discoveryRequest) (string, error) {
+// probed is what the server's answer to an unauthenticated request said.
+type probed struct {
+	metadataURL string
+	scopes      []string
+}
+
+// probeChallenge makes an unauthenticated request and reads the 401 challenge:
+// where the server's metadata is, and which scopes it asks for.
+//
+// An error here is one more attempt to report, not the end of discovery: a
+// server that answers without a challenge, or does not answer this request at
+// all, may still publish its metadata at a well-known location.
+func probeChallenge(req discoveryRequest) (probed, error) {
 	body := strings.NewReader(`{"jsonrpc":"2.0","id":"discovery","method":"initialize","params":{}}`)
 	httpReq, err := http.NewRequest(http.MethodPost, req.serverURL, body)
 	if err != nil {
-		return "", err
+		return probed{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := req.client.Do(httpReq)
 	if err != nil {
-		return "", err
+		return probed{}, err
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxMetadataBytes))
 	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnauthorized {
-		return "", fmt.Errorf("expected an HTTP 401 challenge, got %d — the server may not require authorization", resp.StatusCode)
+		return probed{}, fmt.Errorf("expected an HTTP 401 challenge, got %d — the server may not require authorization", resp.StatusCode)
 	}
-	challenge := resp.Header.Get("WWW-Authenticate")
-	metadataURL := quotedParam(challenge, "resource_metadata")
-	if metadataURL == "" {
-		return "", fmt.Errorf("the challenge names no resource_metadata: %s", orDash(challenge))
+	challenges := resp.Header.Values("WWW-Authenticate")
+	out := probed{
+		metadataURL: bearerParam(challenges, "resource_metadata"),
+		scopes:      strings.Fields(bearerParam(challenges, "scope")),
 	}
-	return metadataURL, nil
+	if out.metadataURL == "" {
+		return out, fmt.Errorf("the challenge names no resource_metadata: %s", orDash(strings.Join(challenges, ", ")))
+	}
+	return out, nil
 }
 
-// fetchResourceMetadata reads RFC 9728 metadata and returns the first
-// authorization server it names.
-func fetchResourceMetadata(req discoveryRequest, metadataURL string) (string, error) {
-	var meta struct {
-		Resource             string   `json:"resource"`
-		AuthorizationServers []string `json:"authorization_servers"`
-	}
+// resourceMetadata is OAuth 2.0 Protected Resource Metadata (RFC 9728), as far
+// as discovery reads it.
+type resourceMetadata struct {
+	Resource             string   `json:"resource"`
+	AuthorizationServers []string `json:"authorization_servers"`
+	ScopesSupported      []string `json:"scopes_supported"`
+}
+
+// resourceMismatchError reports metadata that describes a resource other than
+// the server it was fetched for.
+type resourceMismatchError struct {
+	metadataURL, resource, serverURL string
+}
+
+func (e *resourceMismatchError) Error() string {
+	return fmt.Sprintf("the metadata at %s describes %s, which is not this server (%s). "+
+		"What the server publishes disagrees with the configured url; check the url, "+
+		"or configure oauth.authorizeUrl and oauth.tokenUrl explicitly if the server's metadata is wrong",
+		e.metadataURL, e.resource, e.serverURL)
+}
+
+// fetchResourceMetadata reads one RFC 9728 document and accepts it only if it
+// is this server's own and names an authorization server.
+//
+// The resource check is what stops a server from handing over another
+// resource's metadata, so that the login asks that resource's authorization
+// server for a token and then presents it here (RFC 9728 §3.3).
+func fetchResourceMetadata(req discoveryRequest, metadataURL string) (*resourceMetadata, error) {
+	var meta resourceMetadata
 	if err := getJSON(req, metadataURL, &meta); err != nil {
-		return "", err
+		return nil, err
+	}
+	if meta.Resource == "" {
+		return nil, fmt.Errorf("the document names no resource, so it cannot be tied to this server")
+	}
+	if !resourceMatches(meta.Resource, req.serverURL) {
+		return nil, &resourceMismatchError{metadataURL: metadataURL, resource: meta.Resource, serverURL: req.serverURL}
 	}
 	if len(meta.AuthorizationServers) == 0 {
-		return "", fmt.Errorf("no authorization_servers listed")
+		return nil, fmt.Errorf("no authorization_servers listed")
 	}
-	return meta.AuthorizationServers[0], nil
+	return &meta, nil
+}
+
+// resourceMetadataURLs lists the well-known locations of a server's
+// protected-resource metadata: with the server's path, then at the root
+// (MCP specification 2025-11-25; RFC 9728 §3.1 for how the first is built —
+// the well-known segment goes between the host and the path, and a query
+// stays).
+func resourceMetadataURLs(serverURL string) ([]string, error) {
+	u, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse %q: %w", serverURL, err)
+	}
+	const wellKnown = "/.well-known/oauth-protected-resource"
+	origin := u.Scheme + "://" + u.Host
+
+	path := u.EscapedPath()
+	if path == "/" {
+		path = ""
+	}
+	suffix := path
+	if u.RawQuery != "" {
+		suffix += "?" + u.RawQuery
+	}
+
+	root := origin + wellKnown
+	if suffix == "" {
+		return []string{root}, nil
+	}
+	return []string{root + suffix, root}, nil
+}
+
+// resourceMatches reports whether a metadata document's resource identifier is
+// the server at serverURL: the same scheme, host and port, and a path that is
+// a leading part of the server's, by whole segments.
+//
+// RFC 9728 §3.3 asks for the two to be identical. This is the looser rule the
+// official MCP SDK applies, chosen so that mcp-bridge does not refuse a server
+// those clients connect to (ADR-0006).
+func resourceMatches(resource, serverURL string) bool {
+	r, err := url.Parse(resource)
+	if err != nil || r.Host == "" || r.Fragment != "" {
+		return false
+	}
+	s, err := url.Parse(serverURL)
+	if err != nil {
+		return false
+	}
+	if r.Scheme != s.Scheme || !strings.EqualFold(r.Hostname(), s.Hostname()) || portOf(r) != portOf(s) {
+		return false
+	}
+	resourcePath := strings.TrimSuffix(r.Path, "/")
+	serverPath := strings.TrimSuffix(s.Path, "/")
+	return resourcePath == serverPath || strings.HasPrefix(serverPath, resourcePath+"/")
+}
+
+// portOf returns a URL's port, with the scheme's default when none is written.
+func portOf(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch u.Scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	}
+	return ""
+}
+
+// Where a login's scopes came from, in the words the login prints.
+const (
+	scopesFromChallenge  = "the server's 401 response"
+	scopesFromResource   = "the server's metadata"
+	scopesFromAuthServer = "the authorization server's metadata"
+)
+
+// chooseScopes picks the scopes to request when the configuration names none.
+//
+// The order is the MCP specification's (2025-11-25, "Scope Selection
+// Strategy"): what the server's challenge asks for, then what its metadata
+// lists. The authorization server's own list comes last and is not in the
+// specification; it is what discovery used before, and `"oauth": {}` has no
+// way to write scopes if it stopped working.
+//
+// A refresh token is not something a resource asks for, so servers leave
+// offline_access out of both of the first two, and an OpenID provider such as
+// Microsoft Entra ID issues no refresh token without it. It is therefore added
+// when the authorization server lists it — the next revision of the
+// specification says a client may — and reported as added.
+func chooseScopes(challenge, resource, authServer []string) (scopes []string, source string, addedOfflineAccess bool) {
+	switch {
+	case len(challenge) > 0:
+		scopes, source = challenge, scopesFromChallenge
+	case len(resource) > 0:
+		scopes, source = resource, scopesFromResource
+	case len(authServer) > 0:
+		return authServer, scopesFromAuthServer, false
+	default:
+		return nil, "", false
+	}
+	const offline = "offline_access"
+	if contains(authServer, offline) && !contains(scopes, offline) {
+		scopes = append(append([]string{}, scopes...), offline)
+		addedOfflineAccess = true
+	}
+	return scopes, source, addedOfflineAccess
+}
+
+func contains(list []string, s string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
 }
 
 // fetchAuthServerMetadata tries the well-known metadata locations for an
@@ -393,22 +586,6 @@ func originOf(rawURL string) (string, error) {
 		return "", fmt.Errorf("parse %q: %w", rawURL, err)
 	}
 	return fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host), nil
-}
-
-// quotedParam pulls a quoted value out of a WWW-Authenticate challenge, e.g.
-// resource_metadata="https://example.com/.well-known/...".
-func quotedParam(header, name string) string {
-	key := name + `="`
-	start := strings.Index(header, key)
-	if start < 0 {
-		return ""
-	}
-	start += len(key)
-	end := strings.Index(header[start:], `"`)
-	if end < 0 {
-		return ""
-	}
-	return header[start : start+end]
 }
 
 // LoadDiscovered reads the discovery cache. A missing or unreadable cache is

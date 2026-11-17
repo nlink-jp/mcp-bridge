@@ -300,3 +300,159 @@ func TestHTTPRedirectsAreStillFollowed(t *testing.T) {
 		t.Errorf("redirect was not followed: %v", into)
 	}
 }
+
+// RFC 9728 §3.1: the well-known segment goes between the host and the path,
+// a slash that only terminates the host is dropped, and a query is kept. The
+// MCP specification (2025-11-25) then adds the root location.
+func TestResourceMetadataLocations(t *testing.T) {
+	cases := []struct {
+		server string
+		want   []string
+	}{
+		{
+			"https://example.com/public/mcp",
+			[]string{
+				"https://example.com/.well-known/oauth-protected-resource/public/mcp",
+				"https://example.com/.well-known/oauth-protected-resource",
+			},
+		},
+		{"https://example.com", []string{"https://example.com/.well-known/oauth-protected-resource"}},
+		{"https://example.com/", []string{"https://example.com/.well-known/oauth-protected-resource"}},
+		{
+			// GitHub's server: the path's own trailing slash is part of it.
+			"https://api.githubcopilot.com/mcp/",
+			[]string{
+				"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/",
+				"https://api.githubcopilot.com/.well-known/oauth-protected-resource",
+			},
+		},
+		{
+			"https://example.com/mcp?tenant=a",
+			[]string{
+				"https://example.com/.well-known/oauth-protected-resource/mcp?tenant=a",
+				"https://example.com/.well-known/oauth-protected-resource",
+			},
+		},
+		{
+			"https://example.com:8443/?tenant=a",
+			[]string{
+				"https://example.com:8443/.well-known/oauth-protected-resource?tenant=a",
+				"https://example.com:8443/.well-known/oauth-protected-resource",
+			},
+		},
+	}
+	for _, tc := range cases {
+		got, err := resourceMetadataURLs(tc.server)
+		if err != nil {
+			t.Errorf("%s: %v", tc.server, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s:\n got %v\nwant %v", tc.server, got, tc.want)
+		}
+	}
+}
+
+func TestResourceMatches(t *testing.T) {
+	const server = "https://mcp.example.com/agents/tenant/servers/mail"
+	cases := []struct {
+		resource string
+		server   string
+		want     bool
+	}{
+		{server, server, true},
+		{"https://mcp.example.com/agents/tenant/servers/mail/", server, true},
+		{"https://mcp.example.com/agents", server, true},
+		{"https://mcp.example.com", server, true},
+		{"https://mcp.example.com/", server, true},
+		{"https://MCP.Example.com/agents", server, true},
+		{"https://mcp.example.com:443/agents", server, true},
+		{"HTTPS://mcp.example.com/agents", server, true},
+		{"https://mcp.example.com/mcp", "https://mcp.example.com/mcp/", true},
+
+		// A prefix of the text that is not a prefix of the path.
+		{"https://mcp.example.com/agents/ten", server, false},
+		{"https://mcp.example.com/agents/tenant/servers/mailbox", server, false},
+		// Deeper than the server.
+		{"https://mcp.example.com/agents/tenant/servers/mail/x", server, false},
+		// Another resource altogether.
+		{"https://other.example.com/agents", server, false},
+		{"https://mcp.example.com.evil.example.net/agents", server, false},
+		{"http://mcp.example.com/agents", server, false},
+		{"https://mcp.example.com:8443/agents", server, false},
+		{"https://mcp.example.com/agents#frag", server, false},
+		// Not a resource identifier at all.
+		{"api://11111111-2222-3333-4444-555555555555", server, false},
+		{"/agents", server, false},
+		{"", server, false},
+	}
+	for _, tc := range cases {
+		if got := resourceMatches(tc.resource, tc.server); got != tc.want {
+			t.Errorf("resourceMatches(%q, %q) = %v, want %v", tc.resource, tc.server, got, tc.want)
+		}
+	}
+}
+
+// The order is the MCP specification's "Scope Selection Strategy", with the
+// authorization server's list kept last for the configurations that relied on
+// it; offline_access follows the specification's draft "Refresh Tokens".
+func TestChooseScopes(t *testing.T) {
+	entra := []string{"openid", "profile", "email", "offline_access"}
+	cases := []struct {
+		name                            string
+		challenge, resource, authServer []string
+		want                            []string
+		source                          string
+		added                           bool
+	}{
+		{
+			"the challenge wins over everything",
+			[]string{"mail.read"}, []string{"mail.read", "mail.send"}, []string{"openid"},
+			[]string{"mail.read"}, scopesFromChallenge, false,
+		},
+		{
+			"then the server's metadata",
+			nil, []string{"api://x/.default"}, []string{"openid"},
+			[]string{"api://x/.default"}, scopesFromResource, false,
+		},
+		{
+			"then the authorization server's list, as it was",
+			nil, nil, entra,
+			entra, scopesFromAuthServer, false,
+		},
+		{"and nothing when nothing is published", nil, nil, nil, nil, "", false},
+		{
+			"offline_access joins scopes the server's metadata named",
+			nil, []string{"api://x/.default"}, entra,
+			[]string{"api://x/.default", "offline_access"}, scopesFromResource, true,
+		},
+		{
+			"and scopes the challenge named",
+			[]string{"mail.read"}, nil, entra,
+			[]string{"mail.read", "offline_access"}, scopesFromChallenge, true,
+		},
+		{
+			"but not twice",
+			nil, []string{"api://x/.default", "offline_access"}, entra,
+			[]string{"api://x/.default", "offline_access"}, scopesFromResource, false,
+		},
+		{
+			"and not when the authorization server does not list it",
+			nil, []string{"repo"}, []string{"repo", "gist"},
+			[]string{"repo"}, scopesFromResource, false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resourceBefore := strings.Join(tc.resource, " ")
+			got, source, added := chooseScopes(tc.challenge, tc.resource, tc.authServer)
+			if !reflect.DeepEqual(got, tc.want) || source != tc.source || added != tc.added {
+				t.Errorf("got %v from %q (added=%v), want %v from %q (added=%v)",
+					got, source, added, tc.want, tc.source, tc.added)
+			}
+			if strings.Join(tc.resource, " ") != resourceBefore {
+				t.Errorf("the input was modified: %v", tc.resource)
+			}
+		})
+	}
+}

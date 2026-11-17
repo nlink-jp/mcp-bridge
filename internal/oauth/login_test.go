@@ -31,11 +31,50 @@ type fakeProvider struct {
 	authorizeError string // when set, /authorize redirects with an error
 	noRegistration bool   // when true, metadata omits registration_endpoint
 	clientSecret   string // returned by dynamic registration
+
+	// routes are served ahead of the built-in handlers, so a test can add the
+	// MCP endpoint and metadata documents a particular provider publishes, or
+	// replace the built-in metadata with a 404.
+	routes map[string]http.HandlerFunc
+	hits   map[string]int // requests seen, by path
+}
+
+// route serves a path from a test's own handler.
+func (p *fakeProvider) route(path string, h http.HandlerFunc) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.routes[path] = h
+}
+
+// hitsOn reports how many requests a path received.
+func (p *fakeProvider) hitsOn(path string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.hits[path]
+}
+
+// serveJSON answers with a JSON document.
+func serveJSON(doc any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(doc)
+	}
+}
+
+// challengeWith answers 401 with the given WWW-Authenticate header values, as
+// an MCP server does to an unauthenticated request.
+func challengeWith(values ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		for _, v := range values {
+			w.Header().Add("WWW-Authenticate", v)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
 	t.Helper()
-	p := &fakeProvider{}
+	p := &fakeProvider{routes: map[string]http.HandlerFunc{}, hits: map[string]int{}}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +144,17 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 		fmt.Fprint(w, `{"access_token":"granted","refresh_token":"r","token_type":"Bearer","expires_in":3600}`)
 	})
 
-	p.Server = httptest.NewServer(mux)
+	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
+		p.hits[r.URL.Path]++
+		custom := p.routes[r.URL.Path]
+		p.mu.Unlock()
+		if custom != nil {
+			custom(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(p.Close)
 	return p
 }

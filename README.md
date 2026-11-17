@@ -237,12 +237,23 @@ Run `mcp-bridge login slack` once before the client starts.
 authorization endpoint, and exchanges the returned code for tokens. PKCE
 (RFC 7636) is used on every login, including for confidential clients.
 
-**Discovery.** With `"oauth": {}` the endpoints are found through the
-protected-resource metadata the server advertises in its 401 challenge
-(RFC 9728), falling back to the well-known metadata paths on the server's own
-host, and a client is registered dynamically (RFC 7591). The result is cached
-per server, so a fixed callback port reuses one registration instead of
-creating a new client record on the provider at every login.
+**Discovery.** With `"oauth": {}` the endpoints are found the way the MCP
+specification lays out. The server's 401 challenge points at its
+protected-resource metadata (RFC 9728), or that metadata is at a well-known
+location on the server; the document names the authorization server, whose own
+metadata gives the endpoints. A server that predates this is found through the
+well-known metadata paths on its own host. A client is then registered
+dynamically (RFC 7591). The result is cached per server, so a fixed callback
+port reuses one registration instead of creating a new client record on the
+provider at every login.
+
+The metadata has to be the server's own: its `resource` must match the
+configured `url`, and the login stops when it does not.
+
+Discovery requests the scopes the server asks for: the `scope` in its 401
+challenge, otherwise `scopes_supported` in its metadata, otherwise the
+authorization server's list. `offline_access` is added to the first two when
+the authorization server offers it, so that a refresh token is issued.
 
 A URL that discovery is handed is used only if it is `https`, unless the
 configured `url` is itself `http`. The login and the token refresh do not
