@@ -8,6 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **A pre-registered client can leave its endpoints to discovery.** An `oauth`
+  block with a `clientId` and neither `authorizeUrl` nor `tokenUrl` takes the
+  endpoints and the scopes from what the server publishes and registers
+  nothing. The configuration was all or nothing — `"oauth": {}`, which needs
+  dynamic registration, or every URL and scope by hand — and providers such as
+  Microsoft Entra ID publish their metadata while offering no registration
+  endpoint. Such a block cannot hold a `clientSecret`: a secret is sent only
+  to a token endpoint written in the configuration. Discovery for it runs at
+  every login. See ADR-0006.
+- **`login` prints what discovery decided**: the authorization server and the
+  document that named it, the client, and the scopes with their source.
 - **`callbackHost` sets the host name of the redirect URI.** It was fixed by
   the scheme — `127.0.0.1` for `http`, `localhost` for `https` — and Microsoft
   Entra ID accepts an `http` redirect URI only for `localhost`, so an app
@@ -28,6 +39,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **A dynamic registration is reused only for the server it was made for.**
+  The stored result now records the `url`, and one stored for another `url`,
+  or by an earlier version, is not reused. A login that reused a registration
+  through `--callback-port` registers once more after the update.
+- **A session no longer pairs a stored client secret with a configured
+  `clientId`.** The secret a dynamic registration left behind is sent only
+  with the client ID stored beside it.
 - **Discovery requests the scopes the server asks for.** It read only the
   authorization server's `scopes_supported`, which for an OpenID provider is
   `openid profile email offline_access` and none of the API scopes an MCP

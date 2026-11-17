@@ -28,7 +28,29 @@ type Discovered struct {
 	ClientSecret string   `json:"client_secret,omitempty"`
 	Scopes       []string `json:"scopes,omitempty"`
 	RedirectURI  string   `json:"redirect_uri,omitempty"`
+	// ServerURL is the MCP endpoint the result was discovered for. A result
+	// for another URL describes another server, however alike the name.
+	ServerURL string `json:"server_url,omitempty"`
+
+	// report is how the result came about, for the login to print. It is not
+	// stored: a later session has no use for it.
+	report discoveryReport
 }
+
+// discoveryReport records where each part of a discovery result came from.
+type discoveryReport struct {
+	issuer       string // the authorization server
+	namedBy      string // the metadata document that named it; "" when found on the server's own host
+	client       string // one of the client* values below
+	scopeSource  string // one of the scopesFrom* values; "" when nothing listed any
+	addedOffline bool   // offline_access was added to what the source listed
+}
+
+const (
+	clientConfigured = "configured"
+	clientRegistered = "registered"
+	clientReused     = "reused"
+)
 
 // merge overlays explicitly configured settings on discovered ones. What the
 // user wrote always wins.
@@ -60,9 +82,12 @@ func (d *Discovered) merge(s Settings) Settings {
 type discoveryRequest struct {
 	serverURL   string
 	redirectURI string
-	cachePath   string
-	client      *http.Client
-	out         io.Writer
+	// clientID is the pre-registered client from the configuration. Empty
+	// means there is none and discovery registers one.
+	clientID  string
+	cachePath string
+	client    *http.Client
+	out       io.Writer
 }
 
 // allowHTTP reports whether discovery may use http URLs: only when the
@@ -95,15 +120,25 @@ func checkDiscoveredURL(rawURL string, allowHTTP bool) error {
 	}
 }
 
-// discover finds a server's OAuth endpoints and obtains a client for them.
+// discover finds a server's OAuth endpoints and settles which client uses
+// them.
 //
-// A cached registration is reused when it was made for the same redirect URI.
+// With a pre-registered client there is nothing to obtain, and discovery runs
+// afresh at every login: it leaves nothing behind on the provider, so an old
+// result has no claim over what the server publishes now.
+//
+// Without one, a client is registered dynamically, and a registration made
+// earlier is reused when it was for the same server and the same redirect URI.
 // Registering afresh every time works, but it litters the provider with
 // single-use client records — visible and confusing in an admin console.
 func discover(req discoveryRequest) (*Discovered, error) {
-	if cached, ok := loadDiscovery(req.cachePath); ok && cached.RedirectURI == req.redirectURI && cached.ClientID != "" {
-		fmt.Fprintf(req.out, "Reusing the client registered earlier for %s.\n", req.redirectURI)
-		return cached, nil
+	if req.clientID == "" {
+		if cached, ok := loadDiscovery(req.cachePath); ok && cached.ClientID != "" &&
+			cached.RedirectURI == req.redirectURI && cached.ServerURL == req.serverURL {
+			fmt.Fprintf(req.out, "Reusing the client registered earlier for %s.\n", req.redirectURI)
+			cached.report = discoveryReport{client: clientReused}
+			return cached, nil
+		}
 	}
 
 	if req.serverURL == "" {
@@ -117,28 +152,38 @@ func discover(req discoveryRequest) (*Discovered, error) {
 	}
 	meta := found.meta
 
-	clientID, clientSecret, err := registerClient(req, meta)
-	if err != nil {
-		return nil, err
-	}
-
-	scopes, _, _ := chooseScopes(found.challengeScopes, found.resourceScopes, meta.ScopesSupported)
 	discovered := &Discovered{
 		AuthorizeURL: meta.AuthorizationEndpoint,
 		TokenURL:     meta.TokenEndpoint,
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		Scopes:       scopes,
 		RedirectURI:  req.redirectURI,
+		ServerURL:    req.serverURL,
+		report: discoveryReport{
+			issuer:  meta.Issuer,
+			namedBy: found.namedBy,
+			client:  clientConfigured,
+		},
+	}
+	if discovered.report.issuer == "" {
+		discovered.report.issuer = meta.AuthorizationEndpoint
 	}
 
-	// A cache that cannot be written costs a re-registration next time, not
-	// this login.
+	if req.clientID == "" {
+		discovered.ClientID, discovered.ClientSecret, err = registerClient(req, meta)
+		if err != nil {
+			return nil, err
+		}
+		discovered.report.client = clientRegistered
+	}
+
+	discovered.Scopes, discovered.report.scopeSource, discovered.report.addedOffline =
+		chooseScopes(found.challengeScopes, found.resourceScopes, meta.ScopesSupported)
+
+	// A result that cannot be stored costs the next session its token
+	// endpoint (and, for a registered client, a re-registration), not this
+	// login.
 	if err := saveDiscovery(req.cachePath, discovered); err != nil {
-		fmt.Fprintf(req.out, "Warning: the discovered settings could not be cached: %v\n", err)
+		fmt.Fprintf(req.out, "Warning: the discovered settings could not be stored: %v\n", err)
 	}
-
-	fmt.Fprintf(req.out, "Authorization server found: %s\n", meta.AuthorizationEndpoint)
 	return discovered, nil
 }
 
@@ -221,10 +266,15 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 	meta, err := fetchAuthServerMetadata(req, origin)
 	if err != nil {
 		attempts = append(attempts, fmt.Sprintf("well-known metadata on %s: %v", origin, err))
-		return nil, fmt.Errorf("could not discover the authorization server. "+
-			"If this provider does not publish OAuth metadata, register an OAuth app with it and configure "+
-			"oauth.authorizeUrl, oauth.tokenUrl, oauth.clientId and oauth.clientSecret explicitly.\nTried:\n  - %s",
-			strings.Join(attempts, "\n  - "))
+		remedy := "If this provider does not publish OAuth metadata, register an OAuth app with it and configure " +
+			"oauth.authorizeUrl, oauth.tokenUrl, oauth.clientId and oauth.clientSecret explicitly."
+		if req.clientID != "" {
+			// The client is already there; only the endpoints are missing.
+			remedy = "If this server does not publish OAuth metadata, add oauth.authorizeUrl and oauth.tokenUrl " +
+				"to its configuration."
+		}
+		return nil, fmt.Errorf("could not discover the authorization server. %s\nTried:\n  - %s",
+			remedy, strings.Join(attempts, "\n  - "))
 	}
 	return &located{meta: meta, challengeScopes: probe.scopes}, nil
 }

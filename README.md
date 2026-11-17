@@ -130,6 +130,15 @@ load time, so a typo fails loudly instead of being silently ignored.
         "clientAuthMethod": "post"
       }
     },
+    "entra": {
+      "url": "https://mcp.example.com/tenants/<tenant-id>/mcp",
+      "oauth": {
+        "clientId": "<your-client-id>",
+        "clientAuthMethod": "none",
+        "callbackHost": "localhost",
+        "callbackPort": 8080
+      }
+    },
     "discovered": {
       "url": "https://mcp.example.com/v1/mcp",
       "oauth": {}
@@ -156,8 +165,14 @@ Authentication is chosen by which key is present:
 | none of the below | No authentication |
 | `headers` | Static headers sent with every request |
 | `tokenCommand` | Run an external command to obtain a Bearer token |
-| `oauth` with fields | OAuth2 authorization_code against a pre-registered client |
-| `oauth: {}` | OAuth2 with endpoints and client discovered automatically (RFC 8414 + RFC 7591) |
+| `oauth` with `clientId` and both URLs | OAuth2 authorization_code against a pre-registered client |
+| `oauth` with `clientId` and no URLs | The same client, with the endpoints and scopes taken from what the server publishes |
+| `oauth: {}` | OAuth2 with endpoints discovered and a client registered automatically (RFC 7591) |
+
+An `oauth` block with anything in it needs `clientId`. `authorizeUrl` and
+`tokenUrl` are written together or left out together. Without them there can
+be no `clientSecret`: a secret is sent only to a token endpoint written in the
+file, never to a discovered one.
 
 `oauth` and `tokenCommand` are mutually exclusive. `headers` is not: it
 accompanies either of them rather than replacing them, which is how a server
@@ -237,15 +252,22 @@ Run `mcp-bridge login slack` once before the client starts.
 authorization endpoint, and exchanges the returned code for tokens. PKCE
 (RFC 7636) is used on every login, including for confidential clients.
 
-**Discovery.** With `"oauth": {}` the endpoints are found the way the MCP
-specification lays out. The server's 401 challenge points at its
+**Discovery.** With `"oauth": {}`, or with a `clientId` and no URLs, the
+endpoints are found the way the MCP specification lays out. The server's 401 challenge points at its
 protected-resource metadata (RFC 9728), or that metadata is at a well-known
 location on the server; the document names the authorization server, whose own
 metadata gives the endpoints. A server that predates this is found through the
-well-known metadata paths on its own host. A client is then registered
-dynamically (RFC 7591). The result is cached per server, so a fixed callback
-port reuses one registration instead of creating a new client record on the
-provider at every login.
+well-known metadata paths on its own host.
+
+With `"oauth": {}` a client is then registered dynamically (RFC 7591). The
+registration is stored per server, so a fixed callback port reuses it instead
+of creating a new client record on the provider at every login. With a
+`clientId` nothing is registered, and discovery runs again at each login. The
+providers this suits have no registration endpoint at all — Microsoft Entra ID
+is one — and publish everything else.
+
+`login` prints what discovery decided: the authorization server and the
+document that named it, the client, and the scopes with where they came from.
 
 The metadata has to be the server's own: its `resource` must match the
 configured `url`, and the login stops when it does not.
@@ -254,6 +276,10 @@ Discovery requests the scopes the server asks for: the `scope` in its 401
 challenge, otherwise `scopes_supported` in its metadata, otherwise the
 authorization server's list. `offline_access` is added to the first two when
 the authorization server offers it, so that a refresh token is issued.
+Configured `scopes` replace all of that and are sent exactly as written —
+include `offline_access` yourself if the provider needs it for a refresh
+token. The server you configure is what names the scopes, so write `scopes`
+when the client has consent for more APIs than this server should be given.
 
 A URL that discovery is handed is used only if it is `https`, unless the
 configured `url` is itself `http`. The login and the token refresh do not

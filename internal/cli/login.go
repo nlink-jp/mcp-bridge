@@ -14,6 +14,10 @@ type LoginOptions struct {
 	Server       string
 	CallbackPort int // overrides the configured port; 0 leaves it alone
 	Out          io.Writer
+
+	// OpenBrowser replaces the system browser. Tests set it to drive the flow
+	// themselves; nil opens the real one.
+	OpenBrowser func(rawURL string) error
 }
 
 // Login runs the OAuth flow for a server and stores the resulting tokens.
@@ -56,6 +60,7 @@ func Login(opts LoginOptions) error {
 		TokensPath:    tokensPath,
 		DiscoveryPath: discoveryPath,
 		Out:           opts.Out,
+		OpenBrowser:   opts.OpenBrowser,
 	})
 	return err
 }

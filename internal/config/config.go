@@ -76,6 +76,10 @@ func (s *Server) PinnedCertSHA256() []byte {
 // GitHub Apps, Microsoft Entra ID — where an OAuth app is registered by hand
 // and its redirect URI and token-endpoint authentication are fixed at
 // registration time.
+//
+// A block with a ClientID and neither URL sits between the two: the client is
+// the registered one, and the endpoints and scopes come from what the server
+// publishes (ADR-0006).
 type OAuth struct {
 	AuthorizeURL     string            `json:"authorizeUrl,omitempty"`
 	TokenURL         string            `json:"tokenUrl,omitempty"`
@@ -130,6 +134,13 @@ func (o *OAuth) isEmpty() bool {
 		o.ClientSecret == "" && len(o.Scopes) == 0 && len(o.ExtraParams) == 0 &&
 		o.CallbackPort == 0 && o.CallbackScheme == "" && o.CallbackHost == "" &&
 		o.ClientAuthMethod == ""
+}
+
+// DiscoversEndpoints reports whether the block leaves the authorization and
+// token endpoints to discovery. Validate guarantees they are written together
+// or not at all.
+func (o *OAuth) DiscoversEndpoints() bool {
+	return o.AuthorizeURL == "" && o.TokenURL == ""
 }
 
 // CallbackSchemeOrDefault returns the loopback scheme to use for the OAuth
@@ -318,21 +329,26 @@ func (o *OAuth) problems(name string) []error {
 		errs = append(errs, fmt.Errorf("server %q: "+format, append([]any{name}, args...)...))
 	}
 
-	// A partially filled block is the dangerous case: enough to look configured,
-	// not enough to work. Name every missing field at once.
-	var missing []string
-	if o.AuthorizeURL == "" {
-		missing = append(missing, "oauth.authorizeUrl")
-	}
-	if o.TokenURL == "" {
-		missing = append(missing, "oauth.tokenUrl")
-	}
+	// A block with anything in it describes a pre-registered client, and that
+	// needs the client's ID. The endpoints are another matter: write both, or
+	// leave both out and they are taken from what the server publishes
+	// (ADR-0006). One without the other is the dangerous case — enough to look
+	// configured, not enough to say which was meant.
 	if o.ClientID == "" {
-		missing = append(missing, "oauth.clientId")
+		add("oauth.clientId is required for a pre-registered OAuth client " +
+			"(use \"oauth\": {} to discover the endpoints and register a client instead)")
 	}
-	if len(missing) > 0 {
-		add("%s required for a pre-registered OAuth client (use \"oauth\": {} to discover them instead)",
-			strings.Join(missing, ", "))
+	switch {
+	case o.AuthorizeURL == "" && o.TokenURL != "":
+		add("oauth.authorizeUrl is missing: write it beside oauth.tokenUrl, or leave both out to discover them")
+	case o.AuthorizeURL != "" && o.TokenURL == "":
+		add("oauth.tokenUrl is missing: write it beside oauth.authorizeUrl, or leave both out to discover them")
+	}
+	// A discovered token endpoint is wherever the server's response points. A
+	// secret is sent only to an endpoint this file names.
+	if o.DiscoversEndpoints() && o.ClientSecret != "" {
+		add("oauth.clientSecret needs oauth.authorizeUrl and oauth.tokenUrl: " +
+			"a secret is sent only to a token endpoint written in this file, not to a discovered one")
 	}
 
 	for _, field := range []struct {

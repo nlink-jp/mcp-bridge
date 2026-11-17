@@ -101,10 +101,11 @@ func authOptions(srv *config.Server, name string, logs io.Writer, allowMissingLo
 
 // oauthProvider builds a token provider over the stored login.
 //
-// A server configured with an empty oauth block has no endpoints in the config
-// file; they were recorded by the login, so they come from the discovery
-// cache. Losing that cache is recoverable — log in again — and the error says
-// so rather than reporting a missing file.
+// A server whose oauth block leaves the endpoints out — empty, or with only a
+// pre-registered client — has none in the config file; they were recorded by
+// the login, so they come from the stored discovery result. Losing that is
+// recoverable — log in again — and the error says so rather than reporting a
+// missing file.
 func oauthProvider(srv *config.Server, name string, logs io.Writer) (*oauth.Provider, error) {
 	tokensPath, err := config.TokensPath(name)
 	if err != nil {
@@ -135,11 +136,15 @@ func oauthProvider(srv *config.Server, name string, logs io.Writer) (*oauth.Prov
 		if cfg.TokenURL == "" {
 			cfg.TokenURL = discovered.TokenURL
 		}
+		// A stored secret belongs to the client it was issued with. When the
+		// configuration names its own client, a secret left by an earlier
+		// dynamic registration is not that client's and must not go out
+		// beside its ID.
 		if cfg.ClientID == "" {
 			cfg.ClientID = discovered.ClientID
-		}
-		if cfg.ClientSecret == "" {
-			cfg.ClientSecret = discovered.ClientSecret
+			if cfg.ClientSecret == "" {
+				cfg.ClientSecret = discovered.ClientSecret
+			}
 		}
 		// A dynamically registered client is public, so it has no secret to
 		// present at the token endpoint.

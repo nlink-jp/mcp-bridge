@@ -123,6 +123,15 @@ typo は黙って無視されずにエラーになります。
         "clientAuthMethod": "post"
       }
     },
+    "entra": {
+      "url": "https://mcp.example.com/tenants/<tenant-id>/mcp",
+      "oauth": {
+        "clientId": "<your-client-id>",
+        "clientAuthMethod": "none",
+        "callbackHost": "localhost",
+        "callbackPort": 8080
+      }
+    },
     "discovered": {
       "url": "https://mcp.example.com/v1/mcp",
       "oauth": {}
@@ -149,8 +158,13 @@ typo は黙って無視されずにエラーになります。
 | 以下のいずれも無し | 認証なし |
 | `headers` | 全リクエストに静的ヘッダを付与 |
 | `tokenCommand` | 外部コマンドを実行して Bearer トークンを取得 |
-| `oauth`（フィールドあり） | 事前登録クライアントに対する OAuth2 authorization_code |
-| `oauth: {}` | エンドポイントとクライアントを自動 discovery（RFC 8414 + RFC 7591） |
+| `oauth`（`clientId` と URL 2つ） | 事前登録クライアントに対する OAuth2 authorization_code |
+| `oauth`（`clientId` があり URL 無し） | 同じクライアントで、エンドポイントとスコープをサーバの公開情報から決める |
+| `oauth: {}` | エンドポイントを discovery し、クライアントを自動登録（RFC 7591） |
+
+中身のある `oauth` ブロックには `clientId` が必要です。`authorizeUrl` と `tokenUrl` は、
+両方書くか、両方省きます。省いたときは `clientSecret` を書けません。シークレットを送るのは
+設定ファイルに書いたトークンエンドポイントだけで、discovery で得た先には送りません。
 
 排他なのは `oauth` と `tokenCommand` の間だけです。`headers` は排他ではなく、
 どちらかを置き換えるのではなく併存します — オプションをリクエストヘッダで受け取る
@@ -227,13 +241,20 @@ openssl s_client -connect kvm.example.internal:443 </dev/null 2>/dev/null | open
 返ってきたコードをトークンと交換します。PKCE (RFC 7636) は confidential client の場合も含め
 常に使用します。
 
-**Discovery。** `"oauth": {}` の場合、MCP 仕様が定める順でエンドポイントを探します。サーバの
+**Discovery。** `"oauth": {}` の場合と、`clientId` があって URL が無い場合は、MCP 仕様が定める順で
+エンドポイントを探します。サーバの
 401 チャレンジが protected-resource メタデータ (RFC 9728) の場所を示すか、サーバの well-known の
 場所にそれがあり、その文書が認可サーバを示し、認可サーバ自身のメタデータがエンドポイントを
 示します。この方式より古いサーバは、サーバ自身のホスト上の well-known パスから探します。
-クライアントは動的登録 (RFC 7591) されます。結果はサーバごとにキャッシュされるため、
-コールバックポートを固定していれば毎回新しいクライアントレコードをプロバイダ側に作らず、
-1つの登録を再利用します。
+
+`"oauth": {}` の場合は、続けてクライアントを動的登録 (RFC 7591) します。登録はサーバごとに
+保存されるため、コールバックポートを固定していれば毎回新しいクライアントレコードをプロバイダ側に
+作らず、1つの登録を再利用します。`clientId` がある場合は何も登録せず、ログインのたびに探し直します。
+この構成が合うのは、登録の口を持たず、他はすべて公開しているプロバイダです。Microsoft Entra ID が
+その一つです。
+
+`login` は、discovery で決まったことを表示します。認可サーバとそれを示した文書、クライアント、
+スコープとその出所です。
 
 メタデータは、そのサーバ自身のものでなければ使いません。`resource` が設定の `url` と
 一致しないときは、ログインを止めます。
@@ -241,6 +262,10 @@ openssl s_client -connect kvm.example.internal:443 </dev/null 2>/dev/null | open
 discovery は、サーバが求めるスコープを要求します。401 チャレンジの `scope`、無ければ
 メタデータの `scopes_supported`、それも無ければ認可サーバの一覧です。前の 2 つには、
 認可サーバが `offline_access` を提供していれば足します。refresh token を得るためです。
+設定に `scopes` を書いた場合は、これらの代わりに、書いたとおりに送ります。refresh token に
+`offline_access` が要るプロバイダでは、自分で書いてください。スコープを名指しするのは設定した
+サーバなので、クライアントがそのサーバに渡したい範囲より多くの API に同意済みのときは、
+`scopes` を書いて縛ります。
 
 discovery で得た URL は `https` の場合だけ使います。例外は、設定の `url` 自体が `http` の
 ときです。ログインとトークンの更新は、`https` から `https` 以外へのリダイレクトに従いません。

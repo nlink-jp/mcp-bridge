@@ -172,9 +172,34 @@ func TestValidationErrors(t *testing.T) {
 			"tokenCommand.command is required",
 		},
 		{
-			"partial oauth",
-			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"clientId":"id"}}}}`,
-			"oauth.authorizeUrl, oauth.tokenUrl required",
+			"a block with settings and no client",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"scopes":["a"],"callbackPort":8080}}}}`,
+			"oauth.clientId is required",
+		},
+		{
+			"endpoints without a client",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t"}}}}`,
+			"oauth.clientId is required",
+		},
+		{
+			"token endpoint without the authorize one",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"clientId":"id","tokenUrl":"https://a.example.com/t"}}}}`,
+			"oauth.authorizeUrl is missing",
+		},
+		{
+			"authorize endpoint without the token one",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"clientId":"id","authorizeUrl":"https://a.example.com/a"}}}}`,
+			"oauth.tokenUrl is missing",
+		},
+		{
+			"a secret with discovered endpoints",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"clientId":"id","clientSecret":"s"}}}}`,
+			"oauth.clientSecret needs oauth.authorizeUrl and oauth.tokenUrl",
+		},
+		{
+			"basic with discovered endpoints",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"clientId":"id","clientAuthMethod":"basic"}}}}`,
+			`"basic" requires oauth.clientSecret`,
 		},
 		{
 			"callback port range",
@@ -285,6 +310,36 @@ func TestCallbackHostDefault(t *testing.T) {
 		if got := o.CallbackHostOrDefault(); got != tc.want {
 			t.Errorf("scheme %q host %q: got %q, want %q", tc.scheme, tc.host, got, tc.want)
 		}
+	}
+}
+
+// A pre-registered client may leave its endpoints to discovery: the shape a
+// Microsoft Entra ID app takes, where the client is registered by hand and the
+// rest is published by the server (ADR-0006).
+func TestClientWithoutEndpointsIsAccepted(t *testing.T) {
+	for name, block := range map[string]string{
+		"the client alone":   `{"clientId":"id"}`,
+		"as a public client": `{"clientId":"id","clientAuthMethod":"none","callbackHost":"localhost","callbackPort":8080}`,
+		"with its scopes":    `{"clientId":"id","scopes":["api://x/.default","offline_access"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := mustLoad(t, `{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":`+block+`}}}`)
+			srv := f.Servers["s"]
+			if !srv.OAuth.DiscoversEndpoints() {
+				t.Error("the block is not seen as discovering its endpoints")
+			}
+			// No new mode name: it is a configured client like any other.
+			if got := srv.AuthMode(); got != AuthOAuthConfigured {
+				t.Errorf("AuthMode = %q, want %q", got, AuthOAuthConfigured)
+			}
+		})
+	}
+}
+
+func TestWrittenEndpointsAreNotDiscovered(t *testing.T) {
+	f := mustLoad(t, `{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id","clientSecret":"s"}}}}`)
+	if f.Servers["s"].OAuth.DiscoversEndpoints() {
+		t.Error("a block with both endpoints is seen as discovering them")
 	}
 }
 

@@ -23,8 +23,9 @@ const defaultLoginTimeout = 5 * time.Minute
 // Settings are the OAuth parameters of one server, decoupled from the config
 // file's shape so this package can be exercised without one.
 //
-// An empty Settings means "discover everything": the endpoints via RFC 8414
-// and the client via RFC 7591.
+// An empty Settings means "discover everything": the endpoints from what the
+// server publishes and the client via RFC 7591. A ClientID with no URLs means
+// the client is pre-registered and only the endpoints are discovered.
 type Settings struct {
 	AuthorizeURL     string
 	TokenURL         string
@@ -38,8 +39,8 @@ type Settings struct {
 	ClientAuthMethod string
 }
 
-// complete reports whether the settings identify a pre-registered client, so
-// no discovery is needed.
+// complete reports whether the settings name the endpoints as well as the
+// client, so no discovery is needed.
 func (s Settings) complete() bool {
 	return s.AuthorizeURL != "" && s.TokenURL != "" && s.ClientID != ""
 }
@@ -88,6 +89,7 @@ func Login(cfg LoginConfig) (*Tokens, error) {
 		discovered, err := discover(discoveryRequest{
 			serverURL:   cfg.ServerURL,
 			redirectURI: callback.redirectURI,
+			clientID:    settings.ClientID,
 			cachePath:   cfg.DiscoveryPath,
 			client:      cfg.HTTPClient,
 			out:         cfg.Out,
@@ -95,7 +97,9 @@ func Login(cfg LoginConfig) (*Tokens, error) {
 		if err != nil {
 			return nil, err
 		}
+		configuredScopes := len(settings.Scopes) > 0
 		settings = discovered.merge(settings)
+		reportDiscovery(cfg.Out, discovered.report, settings, configuredScopes)
 	}
 
 	verifier, err := newCodeVerifier()
@@ -149,6 +153,45 @@ func Login(cfg LoginConfig) (*Tokens, error) {
 
 	fmt.Fprintf(cfg.Out, "Logged in to %s. %s\n", cfg.ServerName, tokens.Describe())
 	return tokens, nil
+}
+
+// reportDiscovery prints what discovery decided and where each part came from.
+//
+// It is printed only when discovery ran, and it is what a failed login gets
+// diagnosed from when the server cannot be reached from where the diagnosis
+// happens: the authorization server, the client, and the scopes about to be
+// requested, each with its source.
+func reportDiscovery(out io.Writer, r discoveryReport, settings Settings, configuredScopes bool) {
+	if r.issuer != "" {
+		where := "found on the server's own host"
+		if r.namedBy != "" {
+			where = "named by " + r.namedBy
+		}
+		fmt.Fprintf(out, "Authorization server: %s (%s)\n", r.issuer, where)
+	}
+	switch r.client {
+	case clientConfigured:
+		fmt.Fprintf(out, "Client: %s (the pre-registered one from the configuration)\n", settings.ClientID)
+	case clientRegistered:
+		fmt.Fprintf(out, "Client: %s (registered just now)\n", settings.ClientID)
+	}
+
+	source := r.scopeSource
+	switch {
+	case configuredScopes:
+		source = "the configuration"
+	case r.client == clientReused:
+		source = "the stored registration"
+	}
+	switch {
+	case len(settings.Scopes) == 0:
+		fmt.Fprintln(out, "Scopes: none requested (neither the server nor the authorization server lists any)")
+	case r.addedOffline && !configuredScopes:
+		fmt.Fprintf(out, "Scopes: %s (from %s, with offline_access added so the login can renew itself)\n",
+			strings.Join(settings.Scopes, " "), source)
+	default:
+		fmt.Fprintf(out, "Scopes: %s (from %s)\n", strings.Join(settings.Scopes, " "), source)
+	}
 }
 
 // authorizeURL builds the authorization request.
