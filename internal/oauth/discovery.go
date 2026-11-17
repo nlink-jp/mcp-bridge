@@ -207,23 +207,16 @@ func fetchResourceMetadata(req discoveryRequest, metadataURL string) (string, er
 	return meta.AuthorizationServers[0], nil
 }
 
-// fetchAuthServerMetadata tries the well-known metadata paths for an issuer.
-//
-// Both are tried because providers publish one or the other: RFC 8414 defines
-// the OAuth path, while identity providers built around OpenID Connect
-// frequently publish only the OpenID one.
+// fetchAuthServerMetadata tries the well-known metadata locations for an
+// issuer and returns the first document that names both endpoints.
 func fetchAuthServerMetadata(req discoveryRequest, issuer string) (*authServerMetadata, error) {
-	parsed, err := url.Parse(issuer)
+	candidates, err := authServerMetadataURLs(issuer)
 	if err != nil {
-		return nil, fmt.Errorf("parse issuer %q: %w", issuer, err)
+		return nil, err
 	}
-	path := strings.TrimSuffix(parsed.Path, "/")
 
 	var problems []string
-	for _, wellKnown := range []string{"/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"} {
-		// RFC 8414 inserts the well-known segment before the issuer path
-		// rather than appending it.
-		candidate := fmt.Sprintf("%s://%s%s%s", parsed.Scheme, parsed.Host, wellKnown, path)
+	for _, candidate := range candidates {
 		var meta authServerMetadata
 		if err := getJSON(req, candidate, &meta); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", candidate, err))
@@ -236,6 +229,36 @@ func fetchAuthServerMetadata(req discoveryRequest, issuer string) (*authServerMe
 		return &meta, nil
 	}
 	return nil, fmt.Errorf("%s", strings.Join(problems, "; "))
+}
+
+// authServerMetadataURLs lists where an issuer's metadata may be, in the order
+// the MCP specification (2025-11-25, "Authorization Server Metadata
+// Discovery") prescribes.
+//
+// RFC 8414 inserts the well-known segment before the issuer's path, and OpenID
+// Connect Discovery appends it after. Providers publish at one or another, so
+// all are tried: Microsoft Entra ID serves only the appended form, and answers
+// 404 at both inserted ones. For an issuer without a path the appended form is
+// the same URL as the inserted one, so it is not repeated.
+func authServerMetadataURLs(issuer string) ([]string, error) {
+	parsed, err := url.Parse(issuer)
+	if err != nil {
+		return nil, fmt.Errorf("parse issuer %q: %w", issuer, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("issuer %q is not an absolute URL", issuer)
+	}
+	origin := parsed.Scheme + "://" + parsed.Host
+	path := strings.TrimSuffix(parsed.Path, "/")
+
+	urls := []string{
+		origin + "/.well-known/oauth-authorization-server" + path,
+		origin + "/.well-known/openid-configuration" + path,
+	}
+	if path != "" {
+		urls = append(urls, origin+path+"/.well-known/openid-configuration")
+	}
+	return urls, nil
 }
 
 // registerClient performs RFC 7591 dynamic client registration.

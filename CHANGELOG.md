@@ -17,6 +17,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   listener waits on both `127.0.0.1` and `::1`, which the `https` callback now
   does too. See ADR-0006.
 
+### Fixed
+
+- **Discovery finds authorization server metadata published only at
+  `<issuer>/.well-known/openid-configuration`.** For an issuer with a path,
+  only the two locations that insert the well-known segment before the path
+  were tried. Microsoft Entra ID answers 404 at both and serves its document at
+  the appended location, so discovery could not find it. All three locations
+  the MCP specification lists are now tried, in its order.
+
 ### Changed
 
 - `make package` runs `govulncheck ./...` first (`make vuln`) and stops on a
