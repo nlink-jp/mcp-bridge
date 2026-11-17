@@ -9,7 +9,9 @@ Microsoft Entra ID は、[Slack](slack-setup.ja.md)、[GitHub](github-setup.ja.m
 ある利用者が自分のテナントの Microsoft Agent 365 のサーバ（`mcp_MailTools`）へ、下の設定を
 そのまま使って v0.3.0 で接続しました。ログイン、`inspect` でのツール 22 個の取得、
 refresh token によるトークンの更新が、すべて動いています。このページの例は、そのサーバが
-返した内容です。メンテナの手元には Entra ID のテナントがありません。Agent 365 以外のサーバは
+返した内容です。同じ利用者から、続けて SharePoint、Teams、OneDrive の Agent 365 のサーバにも
+接続できたと報告がありました。こちらは応答の内容を受け取っていないので、例には載せていません。
+メンテナの手元には Entra ID のテナントがありません。Agent 365 以外のサーバは
 別の内容を公開しているかもしれないので、ログインに失敗したときに
 [送ってほしいもの](#うまくいかないとき)を末尾に書きました。
 

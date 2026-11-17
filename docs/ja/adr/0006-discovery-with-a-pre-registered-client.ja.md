@@ -173,6 +173,9 @@ Agent 365 については解消した。メンテナの手元にテナントが�
 変更をここでテナントに対して実行することはできない。観測した応答は設計メモの 6 章に記録し、
 テストで固定した。
 
+**2026-11-18 — Agent 365 の他のサーバ。** 同じ利用者から、SharePoint、Teams、OneDrive の
+サーバにも接続できたと報告があった。応答の内容は受け取っていない。
+
 ## References
 
 - [Model Context Protocol — Authorization (2025-11-25)](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) — 探索の順序、登録方式の優先順位、スコープの決め方

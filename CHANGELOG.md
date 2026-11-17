@@ -11,7 +11,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **The Entra ID route has been run against a tenant.** A user connected
   v0.3.0 to a Microsoft Agent 365 server in their tenant: the login, the tool
   listing and the renewal with the refresh token worked with the
-  configuration in the guide as written. The
+  configuration in the guide as written, and they reported that the servers
+  for SharePoint, Teams and OneDrive connected as well. The
   [Entra ID guide](docs/en/reference/entra-setup.md) and both READMEs now say
   so, the guide's examples are what that server answered, and the record is
   in the v0.3.0 design note and under Follow-up in ADR-0006. No behaviour

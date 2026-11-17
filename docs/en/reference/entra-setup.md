@@ -11,7 +11,9 @@ there is to write.
 (`mcp_MailTools`) in their tenant with the configuration below, as it is
 written: the login, `inspect` listing the server's 22 tools, and a renewal of
 the token with the refresh token all worked. The examples on this page are what
-that server answered. The maintainers have no Entra ID tenant; a server other
+that server answered. The same user then reported that the Agent 365 servers
+for SharePoint, Teams and OneDrive connected as well; what those answer was not
+sent, so it is not shown here. The maintainers have no Entra ID tenant; a server other
 than Agent 365 may publish something else, and if your login fails,
 [what to send](#if-it-does-not-work) is at the end.
 

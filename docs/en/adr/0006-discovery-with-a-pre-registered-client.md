@@ -225,6 +225,10 @@ Entra ID" is closed for Agent 365; the maintainers still have no tenant, so a
 change to this route cannot be run against one here. The observed responses
 are recorded in section 6 of the design note and pinned by a test.
 
+**2026-11-18 — more Agent 365 servers.** The same user reported that the
+servers for SharePoint, Teams and OneDrive connected as well. Their responses
+were not sent.
+
 ## References
 
 - [Model Context Protocol — Authorization (2025-11-25)](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) — discovery order, registration approaches, scope selection
