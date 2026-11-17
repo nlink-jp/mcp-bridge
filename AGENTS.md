@@ -50,8 +50,9 @@ internal/tokencmd/           Bearer tokens from an external command
 internal/cli/                Subcommand bodies (run, list, login, logout, inspect)
 scripts/docs-mirror-check.sh Verifies docs/en and docs/ja are structural mirrors
 docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
-                             holds the RFP, five ADRs, and the Slack and
-                             GitHub setup guides under reference/
+                             holds the RFP, six ADRs, the Slack and GitHub
+                             setup guides under reference/, and the design
+                             note of a release under history/
 ```
 
 ## Runtime layout

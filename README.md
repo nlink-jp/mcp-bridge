@@ -272,8 +272,9 @@ reason. Where a refresh token exists, renewal is automatic.
 - [Design decisions](docs/en/adr/) — why the OAuth settings are explicit
   (0001), why a failed request is always answered (0002), why a token with no
   refresh has no expiry we can act on (0003), why there is one strictly
-  decoded JSON config file (0004), and why a device's certificate is pinned
-  rather than left unverified (0005)
+  decoded JSON config file (0004), why a device's certificate is pinned
+  rather than left unverified (0005), and why a pre-registered client can take
+  its endpoints and scopes from what the server publishes (0006)
 - [RFP](docs/en/mcp-bridge-rfp.md) — the scope decision and what is
   deliberately out of it
 
