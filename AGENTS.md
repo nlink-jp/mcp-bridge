@@ -18,9 +18,11 @@ direction is not supported.
 - Status: released. Verified against the live Slack MCP server (pre-registered
   OAuth) and the live GitHub MCP server (token command). The pre-registered
   OAuth route for GitHub Apps is untested against a live endpoint. Entra ID is
-  not the same shape as Slack (ADR-0006): its discovery was checked against
-  the live Entra ID metadata and authorize endpoint and against GitHub's live
-  server, and no login against an Entra ID tenant has been run.
+  not the same shape as Slack (ADR-0006). A user ran the Entra ID route against
+  a Microsoft Agent 365 server in their tenant (login, tool listing, token
+  renewal); the maintainers have no tenant, so that run cannot be repeated
+  here. What the server answered is in section 6 of
+  `docs/en/history/v0.3.0-design.md`.
 
 ## Build and test
 
@@ -107,9 +109,13 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
   (ADR-0006): the RFC 8707 `resource` parameter, refusing an authorization
   server that does not advertise PKCE support, and checking the metadata's
   `issuer`. Each would stop Microsoft Entra ID from connecting or cannot be
-  tested without a tenant. Do not "fix" them toward the specification without
-  one; `TestLoginWithAPreRegisteredClientAndDiscoveredEndpoints` and the
-  `entraMetadata` fixture pin the Entra-shaped case.
+  tested without a tenant. The login that worked against Agent 365 was made
+  with all three left out, and there is no tenant here to try a change on, so
+  do not "fix" them toward the specification.
+  `TestLoginWithAPreRegisteredClientAndDiscoveredEndpoints` and the
+  `entraMetadata` fixture pin the Entra-shaped case built from published
+  documents; `TestLoginAgainstWhatAgent365Publishes` pins what the real server
+  was observed to answer.
 - **Discovery trusts nothing the server hands it by default.** A discovered URL
   must be `https` unless the configured `url` is `http`
   (`checkDiscoveredURL`); protected-resource metadata must describe the

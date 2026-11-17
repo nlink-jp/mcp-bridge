@@ -5,11 +5,12 @@ Microsoft Entra ID は、[Slack](slack-setup.ja.md)、[GitHub](github-setup.ja.m
 登録したものを使います。ただし Slack と違い、それ以外はサーバがすべて公開しているので、
 書くのはクライアント ID とコールバックの設定だけです。
 
-**この経路は、Entra ID のテナントに対しては実行していません。** 2026-11-17 に確かめたのは次の
-範囲です。mcp-bridge が本物の Entra ID のメタデータを取得し、組み立てた認可リクエストを
-Entra ID がサインイン画面まで受け付けたこと。同じ discovery が GitHub の実 MCP サーバに対して
-動いたこと。それ以外は、Entra ID の公開メタデータを返す疑似サーバに対するテストです。
-Entra ID で保護された実際のサーバが何を返すかは、観測していません。ログインに失敗したときに
+**この経路をテナントに対して実行したのは利用者で、メンテナではありません。** 2026-11-17 に、
+ある利用者が自分のテナントの Microsoft Agent 365 のサーバ（`mcp_MailTools`）へ、下の設定を
+そのまま使って v0.3.0 で接続しました。ログイン、`inspect` でのツール 22 個の取得、
+refresh token によるトークンの更新が、すべて動いています。このページの例は、そのサーバが
+返した内容です。メンテナの手元には Entra ID のテナントがありません。Agent 365 以外のサーバは
+別の内容を公開しているかもしれないので、ログインに失敗したときに
 [送ってほしいもの](#うまくいかないとき)を末尾に書きました。
 
 ## Entra ID が他と違う点
@@ -20,8 +21,9 @@ Entra ID で保護された実際のサーバが何を返すかは、観測し�
   `127.0.0.1` で、`"callbackHost": "localhost"` で切り替えます。`localhost` の場合、Entra ID は
   ポートを照合しません。パスは照合し、mcp-bridge は常に `/callback` を使います。
 - **登録の口がありません。** そのため `"oauth": {}` は動きません。
-- **refresh token は `offline_access` を要求したときにだけ発行されます。** mcp-bridge は、
-  サーバが示したスコープにこれを足します。
+- **refresh token は `offline_access` を要求したときにだけ発行されます。** Agent 365 の
+  サーバは、自分のスコープの一覧にこれを含めています。含めていないサーバの場合は、
+  mcp-bridge がサーバの示したスコープに足します。
 - **トークンは 1 つの API のためのものです。** どの API かは要求したスコープで決まります。
   MCP サーバはそれぞれ自分のスコープを示すので、クライアントが 1 つでも、サーバが 2 つあれば
   ログインは 2 回になります。
@@ -44,7 +46,7 @@ Entra ID で保護された実際のサーバが何を返すかは、観測し�
 {
   "servers": {
     "m365-mail": {
-      "url": "https://<mcp-server-host>/<path-of-the-mail-server>",
+      "url": "https://agent365.svc.cloud.microsoft/agents/tenants/<tenant-id>/servers/mcp_MailTools",
       "oauth": {
         "clientId": "<application-client-id>",
         "clientAuthMethod": "none",
@@ -53,7 +55,7 @@ Entra ID で保護された実際のサーバが何を返すかは、観測し�
       }
     },
     "m365-calendar": {
-      "url": "https://<mcp-server-host>/<path-of-the-calendar-server>",
+      "url": "https://agent365.svc.cloud.microsoft/agents/tenants/<tenant-id>/servers/<name-of-the-calendar-server>",
       "oauth": {
         "clientId": "<application-client-id>",
         "clientAuthMethod": "none",
@@ -82,18 +84,28 @@ mcp-bridge login m365-mail
 
 ```text
 Discovering the authorization server...
-Authorization server: https://login.microsoftonline.com/<tenant-id>/v2.0 (named by https://<mcp-server-host>/...)
+Authorization server: https://login.microsoftonline.com/organizations/v2.0 (named by https://agent365.svc.cloud.microsoft/.well-known/oauth-protected-resource/agents/tenants/<tenant-id>/servers/mcp_MailTools)
 Client: <application-client-id> (the pre-registered one from the configuration)
-Scopes: <the server's scopes> offline_access (from the server's metadata, with offline_access added so the login can renew itself)
+Scopes: https://agent365.svc.cloud.microsoft/agents/tenants/<tenant-id>/servers/mcp_MailTools/.default openid profile offline_access (from the server's metadata)
 Opening a browser to authorize m365-mail.
 ```
 
-- **Authorization server** は、サーバが案内したテナントと、それを示した文書です。
+- **Authorization server** は、サーバが示した認可サーバと、それを示した文書です。
+  Agent 365 のサーバが示すのは Entra ID の `organizations` で、自分のテナント専用のものでは
+  ありません。どのテナントの職場・学校アカウントでも受け付ける入口です。
 - **Scopes** は、これから要求するスコープと、それを示したものです。サーバの 401 応答、
-  サーバのメタデータ、認可サーバのメタデータのいずれかになります。
+  サーバのメタデータ、認可サーバのメタデータのいずれかになります。mcp-bridge が
+  `offline_access` を足したときは、この行にそう表示されます。
 
-ブラウザでサインインし、同意します。ログインは `Logged in to m365-mail.` で終わり、
-トークンが自動で更新されるかどうかを表示します。サーバごとに繰り返します。
+ブラウザでサインインし、同意します。ログインは次の行で終わります。
+
+```text
+Logged in to m365-mail. expires <time>; renews automatically
+```
+
+`renews automatically` は、refresh token が発行されたという意味です。アクセストークンが
+切れると `run` と `inspect` が自分で更新し、そのとき Entra ID が返す新しい refresh token に
+置き換えます。ログインはサーバごとに繰り返します。
 
 ## 4. MCP クライアントに組み込む
 

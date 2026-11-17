@@ -197,6 +197,34 @@ if it stops working.
 **Add `offline_access` even to configured `scopes`.** Rejected. What is written
 in the configuration would no longer be what is sent.
 
+## Follow-up
+
+**2026-11-17 — run against a tenant.** After the release, the reporting user
+connected v0.3.0 to a Microsoft Agent 365 server in their tenant with a
+`clientId`-only block and `"callbackHost": "localhost"`. The login, the tool
+listing and a renewal with the refresh token worked. What the Context called
+not verified was observed:
+
+- The server answers an unauthenticated request with 401 and a challenge that
+  names its metadata and carries no `scope`. The metadata's `resource` is the
+  configured `url` exactly, so the leading-path rule was not what let it
+  through.
+- The authorization server it names is Entra ID's `organizations` endpoint, not
+  the tenant's own. Its document is at the appended location and its `issuer`
+  holds `{tenantid}`, as measured on the common endpoint.
+- The server's own scope list already holds `offline_access`. The scopes came
+  from the server's metadata and nothing was added, so the rule that adds
+  `offline_access` has still not acted against Entra ID.
+- The login was made with no `resource` parameter, with PKCE not advertised
+  and with the `issuer` unchecked: the three things listed as not done.
+- A refresh request without `scope` returned a new access token and a new
+  refresh token, and the server accepted the new token.
+
+No decision changes. The consequence "released without having been run against
+Entra ID" is closed for Agent 365; the maintainers still have no tenant, so a
+change to this route cannot be run against one here. The observed responses
+are recorded in section 6 of the design note and pinned by a test.
+
 ## References
 
 - [Model Context Protocol — Authorization (2025-11-25)](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) — discovery order, registration approaches, scope selection

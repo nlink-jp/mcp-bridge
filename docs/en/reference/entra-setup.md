@@ -6,12 +6,13 @@ client is one you or your administrator registered — but unlike Slack, the
 server publishes everything else, so the client ID and the callback are all
 there is to write.
 
-**This route has not been run against an Entra ID tenant.** What was checked on
-2026-11-17: mcp-bridge fetched the live Entra ID metadata and built an
-authorization request that Entra ID took as far as its sign-in page; the same
-discovery ran against GitHub's live MCP server; the rest is tested against a
-stand-in that serves Entra ID's published metadata. What a real server protected
-by Entra ID answers has not been observed. If your login fails,
+**This route was run against a tenant by a user, not by the maintainers.** On
+2026-11-17 a user connected v0.3.0 to a Microsoft Agent 365 server
+(`mcp_MailTools`) in their tenant with the configuration below, as it is
+written: the login, `inspect` listing the server's 22 tools, and a renewal of
+the token with the refresh token all worked. The examples on this page are what
+that server answered. The maintainers have no Entra ID tenant; a server other
+than Agent 365 may publish something else, and if your login fails,
 [what to send](#if-it-does-not-work) is at the end.
 
 ## What Entra ID does differently
@@ -23,7 +24,8 @@ by Entra ID answers has not been observed. If your login fails,
   `localhost`, Entra ID does not compare the port. It does compare the path,
   and mcp-bridge always uses `/callback`.
 - **There is no registration endpoint**, so `"oauth": {}` cannot work.
-- **A refresh token is issued only when `offline_access` is requested.**
+- **A refresh token is issued only when `offline_access` is requested.** An
+  Agent 365 server lists it among its own scopes. Where a server does not,
   mcp-bridge adds it to the scopes the server names.
 - **A token is for one API**, chosen by the scopes requested. Each MCP server
   names its own, which is why two servers need two logins even with one client.
@@ -46,7 +48,7 @@ given one.
 {
   "servers": {
     "m365-mail": {
-      "url": "https://<mcp-server-host>/<path-of-the-mail-server>",
+      "url": "https://agent365.svc.cloud.microsoft/agents/tenants/<tenant-id>/servers/mcp_MailTools",
       "oauth": {
         "clientId": "<application-client-id>",
         "clientAuthMethod": "none",
@@ -55,7 +57,7 @@ given one.
       }
     },
     "m365-calendar": {
-      "url": "https://<mcp-server-host>/<path-of-the-calendar-server>",
+      "url": "https://agent365.svc.cloud.microsoft/agents/tenants/<tenant-id>/servers/<name-of-the-calendar-server>",
       "oauth": {
         "clientId": "<application-client-id>",
         "clientAuthMethod": "none",
@@ -85,20 +87,28 @@ Before the browser opens, the login prints what it found:
 
 ```text
 Discovering the authorization server...
-Authorization server: https://login.microsoftonline.com/<tenant-id>/v2.0 (named by https://<mcp-server-host>/...)
+Authorization server: https://login.microsoftonline.com/organizations/v2.0 (named by https://agent365.svc.cloud.microsoft/.well-known/oauth-protected-resource/agents/tenants/<tenant-id>/servers/mcp_MailTools)
 Client: <application-client-id> (the pre-registered one from the configuration)
-Scopes: <the server's scopes> offline_access (from the server's metadata, with offline_access added so the login can renew itself)
+Scopes: https://agent365.svc.cloud.microsoft/agents/tenants/<tenant-id>/servers/mcp_MailTools/.default openid profile offline_access (from the server's metadata)
 Opening a browser to authorize m365-mail.
 ```
 
-- **Authorization server** is the tenant the server sent you to, and the
-  document that said so.
+- **Authorization server** is the one the server named, and the document that
+  said so. An Agent 365 server names Entra ID's `organizations` endpoint, which
+  takes a work or school account of any tenant, and not your tenant's own.
 - **Scopes** are what is about to be requested and who named them: the server's
   401 response, the server's metadata, or the authorization server's metadata.
+  Where mcp-bridge added `offline_access`, the line says so.
 
 Sign in and consent in the browser. The login ends with
-`Logged in to m365-mail.` and says whether the token renews by itself. Repeat
-for each server.
+
+```text
+Logged in to m365-mail. expires <time>; renews automatically
+```
+
+`renews automatically` means a refresh token was issued: `run` and `inspect`
+renew the access token by themselves when it expires, and keep the new refresh
+token Entra ID returns with it. Repeat the login for each server.
 
 ## 4. Wire it into your MCP client
 

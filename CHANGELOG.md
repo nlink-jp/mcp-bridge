@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **The Entra ID route has been run against a tenant.** A user connected
+  v0.3.0 to a Microsoft Agent 365 server in their tenant: the login, the tool
+  listing and the renewal with the refresh token worked with the
+  configuration in the guide as written. The
+  [Entra ID guide](docs/en/reference/entra-setup.md) and both READMEs now say
+  so, the guide's examples are what that server answered, and the record is
+  in the v0.3.0 design note and under Follow-up in ADR-0006. No behaviour
+  changes; a test pins the observed responses.
+
 ## [0.3.0] - 2026-11-17
 
 Connecting to MCP servers protected by Microsoft Entra ID (ADR-0006). No login
