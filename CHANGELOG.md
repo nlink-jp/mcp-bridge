@@ -6,6 +6,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`callbackHost` sets the host name of the redirect URI.** It was fixed by
+  the scheme — `127.0.0.1` for `http`, `localhost` for `https` — and Microsoft
+  Entra ID accepts an `http` redirect URI only for `localhost`, so an app
+  registered with `http://localhost:<port>/callback` could not be logged in to
+  (`AADSTS50011`). `"callbackHost": "localhost"` or `"127.0.0.1"` now says
+  which; left out, the host follows the scheme as before. With `localhost` the
+  listener waits on both `127.0.0.1` and `::1`, which the `https` callback now
+  does too. See ADR-0006.
+
 ### Changed
 
 - `make package` runs `govulncheck ./...` first (`make vuln`) and stops on a

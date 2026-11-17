@@ -166,6 +166,7 @@ func oauthSettings(srv *config.Server) oauth.Settings {
 		ExtraParams:      o.ExtraParams,
 		CallbackPort:     o.CallbackPort,
 		CallbackScheme:   o.CallbackScheme,
+		CallbackHost:     o.CallbackHost,
 		ClientAuthMethod: o.ClientAuthMethod,
 	}
 }

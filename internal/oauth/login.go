@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,6 +34,7 @@ type Settings struct {
 	ExtraParams      map[string]string
 	CallbackPort     int
 	CallbackScheme   string
+	CallbackHost     string // "" follows the scheme: 127.0.0.1 for http, localhost for https
 	ClientAuthMethod string
 }
 
@@ -180,7 +182,6 @@ func authorizeURL(s Settings, redirectURI, stateParam, challenge string) (string
 type callbackServer struct {
 	redirectURI string
 	server      *http.Server
-	listener    net.Listener
 
 	stateParam string
 	codes      chan string
@@ -193,6 +194,10 @@ type callbackServer struct {
 // declares an exact redirect URI, so the port cannot vary between logins.
 // Otherwise the OS picks one, which is fine for dynamic registration because
 // the client is registered fresh with whatever port was chosen.
+//
+// The host name in the redirect URI is the provider's to dictate, like the
+// port and the scheme (ADR-0001, ADR-0006). When it is "localhost" the browser
+// decides which loopback address that means, so the listener waits on both.
 func startCallbackServer(s Settings, out io.Writer) (*callbackServer, error) {
 	tcp, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.CallbackPort))
 	if err != nil {
@@ -202,33 +207,37 @@ func startCallbackServer(s Settings, out io.Writer) (*callbackServer, error) {
 		}
 		return nil, fmt.Errorf("start the OAuth callback listener: %w", err)
 	}
-
 	port := tcp.Addr().(*net.TCPAddr).Port
-	scheme, host := "http", "127.0.0.1"
-	listener := net.Listener(tcp)
+	listeners := []net.Listener{tcp}
 
-	if s.CallbackScheme == "https" {
+	scheme, host := callbackSchemeAndHost(s)
+	if host == "localhost" {
+		if v6 := listenLoopbackV6(port, out); v6 != nil {
+			listeners = append(listeners, v6)
+		}
+	}
+
+	if scheme == "https" {
 		cert, err := loopbackCert()
 		if err != nil {
-			tcp.Close()
+			for _, l := range listeners {
+				l.Close()
+			}
 			return nil, err
 		}
-		listener = tls.NewListener(tcp, &tls.Config{
+		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS12,
-		})
-		scheme = "https"
-		// Providers that restrict redirect URIs to host names accept
-		// "localhost" where they reject the IP literal; the certificate
-		// covers both.
-		host = "localhost"
+		}
+		for i, l := range listeners {
+			listeners[i] = tls.NewListener(l, tlsConfig)
+		}
 		fmt.Fprintln(out, "Note: the browser will warn that the callback connection is not secure. "+
 			"That is the self-signed certificate for this loopback listener — continuing is expected.")
 	}
 
 	cb := &callbackServer{
 		redirectURI: fmt.Sprintf("%s://%s:%d/callback", scheme, host, port),
-		listener:    listener,
 		codes:       make(chan string, 1),
 		errs:        make(chan error, 1),
 	}
@@ -249,9 +258,59 @@ func startCallbackServer(s Settings, out io.Writer) (*callbackServer, error) {
 		// outcome of the flow is reported by Login itself, so nothing is lost.
 		ErrorLog: log.New(io.Discard, "", 0),
 	}
-	go func() { _ = cb.server.Serve(listener) }()
+	// Serve closes its listener when the server is closed, including when the
+	// close wins the race with this goroutine starting.
+	for _, l := range listeners {
+		go func(l net.Listener) { _ = cb.server.Serve(l) }(l)
+	}
 
 	return cb, nil
+}
+
+// callbackSchemeAndHost resolves the scheme and host name of the redirect URI.
+//
+// An unset host follows the scheme: the IP literal for http, and "localhost"
+// for https, where providers that restrict redirect URIs to host names accept
+// the name and reject the literal (the certificate covers both).
+func callbackSchemeAndHost(s Settings) (scheme, host string) {
+	scheme = "http"
+	if s.CallbackScheme == "https" {
+		scheme = "https"
+	}
+	host = s.CallbackHost
+	if host == "" {
+		host = "127.0.0.1"
+		if scheme == "https" {
+			host = "localhost"
+		}
+	}
+	return scheme, host
+}
+
+// listenLoopbackV6 also waits on the IPv6 loopback address, for a redirect URI
+// that names "localhost". It returns nil when it cannot.
+//
+// A machine without an IPv6 loopback is the ordinary reason, and there
+// "localhost" cannot resolve to it either, so nothing needs saying. The case
+// worth a line is the other one: the address exists and this port is taken on
+// it. A browser that resolves the name to ::1 then reaches whatever holds the
+// port instead of this listener. That process cannot use what it receives —
+// the code is useless without the PKCE verifier — but the login would wait
+// with nothing on screen to explain why.
+func listenLoopbackV6(port int, out io.Writer) net.Listener {
+	l, err := net.Listen("tcp", net.JoinHostPort("::1", strconv.Itoa(port)))
+	if err == nil {
+		return l
+	}
+	probe, probeErr := net.Listen("tcp", "[::1]:0")
+	if probeErr != nil {
+		return nil
+	}
+	probe.Close()
+	fmt.Fprintf(out, "Note: could not listen on [::1]:%d (%v). If the browser does not show mcp-bridge's "+
+		"\"Authorized\" page after you approve, replace \"localhost\" with \"127.0.0.1\" in its address bar "+
+		"and load the page again.\n", port, err)
+	return nil
 }
 
 // expect records the state parameter the callback must carry.

@@ -252,6 +252,13 @@ self-signed certificate that never leaves memory, and the redirect URI uses
 The browser shows a one-time "not secure" warning; continuing past it is the
 expected path.
 
+**The callback host.** The redirect URI names `127.0.0.1` for `http` and
+`localhost` for `https`. Set `"callbackHost"` to `"localhost"` or `"127.0.0.1"`
+when the provider registered the other one — Microsoft Entra ID accepts an
+`http` redirect URI only for `localhost`. With `localhost` the listener waits
+on both `127.0.0.1` and `::1`, whichever the browser resolves the name to.
+Update mcp-bridge before adding the key: older versions reject it as unknown.
+
 **Fixed ports.** A pre-registered OAuth app declares one exact redirect URI, so
 its callback port cannot change between logins. Set `"callbackPort"`, or pass
 `--callback-port` for a one-off. If that port is busy the login says so rather

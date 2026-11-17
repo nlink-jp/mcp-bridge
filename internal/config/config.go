@@ -85,6 +85,7 @@ type OAuth struct {
 	ExtraParams      map[string]string `json:"extraParams,omitempty"`
 	CallbackPort     int               `json:"callbackPort,omitempty"`
 	CallbackScheme   string            `json:"callbackScheme,omitempty"`
+	CallbackHost     string            `json:"callbackHost,omitempty"`
 	ClientAuthMethod string            `json:"clientAuthMethod,omitempty"`
 }
 
@@ -127,7 +128,8 @@ func (s *Server) AuthMode() AuthMode {
 func (o *OAuth) isEmpty() bool {
 	return o.AuthorizeURL == "" && o.TokenURL == "" && o.ClientID == "" &&
 		o.ClientSecret == "" && len(o.Scopes) == 0 && len(o.ExtraParams) == 0 &&
-		o.CallbackPort == 0 && o.CallbackScheme == "" && o.ClientAuthMethod == ""
+		o.CallbackPort == 0 && o.CallbackScheme == "" && o.CallbackHost == "" &&
+		o.ClientAuthMethod == ""
 }
 
 // CallbackSchemeOrDefault returns the loopback scheme to use for the OAuth
@@ -137,6 +139,23 @@ func (o *OAuth) CallbackSchemeOrDefault() string {
 		return "http"
 	}
 	return o.CallbackScheme
+}
+
+// CallbackHostOrDefault returns the host name the redirect URI carries.
+//
+// Left unset it follows the scheme, as it did before the key existed: the IP
+// literal for http, and the name for https, where providers that restrict
+// redirect URIs to host names reject the literal. It is a key of its own
+// because a provider's rule is about the name and not the scheme: Microsoft
+// Entra ID accepts an http redirect URI only for localhost (ADR-0006).
+func (o *OAuth) CallbackHostOrDefault() string {
+	if o.CallbackHost != "" {
+		return o.CallbackHost
+	}
+	if o.CallbackSchemeOrDefault() == "https" {
+		return "localhost"
+	}
+	return "127.0.0.1"
 }
 
 // ClientAuthMethodOrDefault returns how client credentials reach the token
@@ -339,6 +358,12 @@ func (o *OAuth) problems(name string) []error {
 	case "", "http", "https":
 	default:
 		add("oauth.callbackScheme must be \"http\" or \"https\", got %q", o.CallbackScheme)
+	}
+
+	switch o.CallbackHost {
+	case "", "127.0.0.1", "localhost":
+	default:
+		add("oauth.callbackHost must be \"127.0.0.1\" or \"localhost\", got %q", o.CallbackHost)
 	}
 
 	switch o.ClientAuthMethod {

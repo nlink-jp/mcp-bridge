@@ -187,6 +187,16 @@ func TestValidationErrors(t *testing.T) {
 			"callbackScheme must be",
 		},
 		{
+			"callback host",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id","callbackHost":"::1"}}}}`,
+			`callbackHost must be "127.0.0.1" or "localhost"`,
+		},
+		{
+			"callback host alone is not an empty block",
+			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"callbackHost":"localhost"}}}}`,
+			"oauth.clientId",
+		},
+		{
 			"client auth method",
 			`{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id","clientAuthMethod":"jwt"}}}}`,
 			"clientAuthMethod must be",
@@ -255,5 +265,34 @@ func TestDefaults(t *testing.T) {
 	}
 	if got := o.ClientAuthMethodOrDefault(); got != "post" {
 		t.Errorf("default client auth method = %q", got)
+	}
+}
+
+// An unset callback host follows the scheme, which is what both did before the
+// key existed; a written one is taken as written, under either scheme.
+func TestCallbackHostDefault(t *testing.T) {
+	cases := []struct {
+		scheme, host, want string
+	}{
+		{"", "", "127.0.0.1"},
+		{"http", "", "127.0.0.1"},
+		{"https", "", "localhost"},
+		{"http", "localhost", "localhost"},
+		{"https", "127.0.0.1", "127.0.0.1"},
+	}
+	for _, tc := range cases {
+		o := &OAuth{CallbackScheme: tc.scheme, CallbackHost: tc.host}
+		if got := o.CallbackHostOrDefault(); got != tc.want {
+			t.Errorf("scheme %q host %q: got %q, want %q", tc.scheme, tc.host, got, tc.want)
+		}
+	}
+}
+
+func TestCallbackHostIsAccepted(t *testing.T) {
+	for _, host := range []string{"localhost", "127.0.0.1"} {
+		f := mustLoad(t, `{"servers":{"s":{"url":"https://e.example.com/mcp","oauth":{"authorizeUrl":"https://a.example.com/a","tokenUrl":"https://a.example.com/t","clientId":"id","callbackHost":"`+host+`"}}}}`)
+		if got := f.Servers["s"].OAuth.CallbackHost; got != host {
+			t.Errorf("callbackHost = %q, want %q", got, host)
+		}
 	}
 }
