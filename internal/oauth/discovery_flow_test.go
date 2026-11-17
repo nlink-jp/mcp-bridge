@@ -431,6 +431,31 @@ func TestTwoServersShareAClientAndAPort(t *testing.T) {
 	}
 }
 
+// A server that cannot be reached is reported as that, once. Asking the other
+// locations on the same host would repeat the failure under a heading about
+// missing metadata, and send the reader to fix a configuration that is fine.
+func TestUnreachableServerIsReportedAsUnreachable(t *testing.T) {
+	p := newFakeProvider(t)
+	gone := p.URL + "/mcp"
+	p.Close() // nothing listens there any more
+
+	cfg := loginConfig(t, p, entraSettings(freePort(t)))
+	cfg.ServerURL = gone
+	cfg.HTTPClient = &http.Client{}
+	_, err := Login(cfg)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.HasPrefix(err.Error(), "could not reach "+gone+": ") {
+		t.Errorf("error does not lead with the unreachable server: %v", err)
+	}
+	for _, never := range []string{"does not publish", "Tried:", ".well-known"} {
+		if strings.Contains(err.Error(), never) {
+			t.Errorf("error speaks of metadata (%q) for a server that never answered: %v", never, err)
+		}
+	}
+}
+
 // When discovery fails for a pre-registered client, the way forward is to
 // write the endpoints. Advice about registering an app would be wrong: the
 // client is already registered.

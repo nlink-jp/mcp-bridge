@@ -225,6 +225,12 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 
 	probe, err := probeChallenge(req)
 	if err != nil {
+		if !probe.reached {
+			// No answer at all. Every other location is on the same host, so
+			// asking them would only repeat this failure four more times under
+			// a heading about missing metadata — which is not what happened.
+			return nil, fmt.Errorf("could not reach %s: %w", req.serverURL, err)
+		}
 		attempts = append(attempts, fmt.Sprintf("challenge from %s: %v", req.serverURL, err))
 	}
 
@@ -284,6 +290,7 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 
 // probed is what the server's answer to an unauthenticated request said.
 type probed struct {
+	reached     bool // the server answered, whatever it said
 	metadataURL string
 	scopes      []string
 }
@@ -291,9 +298,9 @@ type probed struct {
 // probeChallenge makes an unauthenticated request and reads the 401 challenge:
 // where the server's metadata is, and which scopes it asks for.
 //
-// An error here is one more attempt to report, not the end of discovery: a
-// server that answers without a challenge, or does not answer this request at
-// all, may still publish its metadata at a well-known location.
+// An error from a server that answered is one more attempt to report, not the
+// end of discovery: a server that answers without a challenge, or with one
+// that names nothing, may still publish its metadata at a well-known location.
 func probeChallenge(req discoveryRequest) (probed, error) {
 	body := strings.NewReader(`{"jsonrpc":"2.0","id":"discovery","method":"initialize","params":{}}`)
 	httpReq, err := http.NewRequest(http.MethodPost, req.serverURL, body)
@@ -311,10 +318,11 @@ func probeChallenge(req discoveryRequest) (probed, error) {
 	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnauthorized {
-		return probed{}, fmt.Errorf("expected an HTTP 401 challenge, got %d — the server may not require authorization", resp.StatusCode)
+		return probed{reached: true}, fmt.Errorf("expected an HTTP 401 challenge, got %d — the server may not require authorization", resp.StatusCode)
 	}
 	challenges := resp.Header.Values("WWW-Authenticate")
 	out := probed{
+		reached:     true,
 		metadataURL: bearerParam(challenges, "resource_metadata"),
 		scopes:      strings.Fields(bearerParam(challenges, "scope")),
 	}
