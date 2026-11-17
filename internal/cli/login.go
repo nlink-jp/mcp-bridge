@@ -59,7 +59,7 @@ func Login(opts LoginOptions) error {
 		Settings:      settings,
 		TokensPath:    tokensPath,
 		DiscoveryPath: discoveryPath,
-		Out:           opts.Out,
+		Out:           printable(opts.Out),
 		OpenBrowser:   opts.OpenBrowser,
 	})
 	return err

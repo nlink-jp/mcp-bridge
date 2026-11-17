@@ -33,6 +33,9 @@ type InspectOptions struct {
 // say confirms the URL, the protocol and the tool list regardless of whether
 // the login has happened yet.
 func Inspect(opts InspectOptions) error {
+	// Everything printed below the URL is what the server says about itself.
+	opts.Out = printable(opts.Out)
+
 	srv, err := loadServer(opts.ConfigPath, opts.Server)
 	if err != nil {
 		return err

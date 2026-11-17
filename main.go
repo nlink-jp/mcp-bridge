@@ -47,7 +47,8 @@ var errUsage = errors.New("usage")
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		if !errors.Is(err, errUsage) {
-			fmt.Fprintf(os.Stderr, "mcp-bridge: %v\n", err)
+			// An error can quote what a server sent; see cli.Printable.
+			fmt.Fprintf(os.Stderr, "mcp-bridge: %s\n", cli.Printable(err.Error()))
 		}
 		os.Exit(1)
 	}
