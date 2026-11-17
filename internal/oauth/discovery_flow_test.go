@@ -359,6 +359,67 @@ func TestAuthorizationServerIsShownAsItWasNamed(t *testing.T) {
 	}
 }
 
+// What a Microsoft Agent 365 server publishes, as a user measured it in their
+// tenant on 2026-11-17 (the tenant ID replaced): a 401 with an empty body whose
+// challenge names metadata at the path-inserted well-known location and carries
+// no scope; 400 at the root well-known location; metadata whose resource is the
+// server's URL, whose authorization server is the "organizations" endpoint and
+// whose scopes already hold offline_access; and, at that endpoint, the public
+// document with the placeholder issuer. v0.3.0 logged in against it, and this
+// pins the request it sent and the lines it printed.
+func TestLoginAgainstWhatAgent365Publishes(t *testing.T) {
+	const serverPath = "/agents/tenants/tenant-id/servers/mcp_MailTools"
+	const metadataPath = "/.well-known/oauth-protected-resource" + serverPath
+	p := newFakeProvider(t)
+	resource := p.URL + serverPath
+	p.route("/.well-known/oauth-authorization-server", http.NotFound)
+	p.route("/register", http.NotFound)
+	p.route(serverPath, challengeWith(`Bearer resource_metadata="`+p.URL+metadataPath+`"`))
+	p.route("/.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "EndpointInvalid", http.StatusBadRequest)
+	})
+	p.route(metadataPath, serveJSON(map[string]any{
+		"resource_name":            "mcp_MailTools",
+		"resource":                 resource,
+		"authorization_servers":    []string{p.URL + "/organizations/v2.0"},
+		"scopes_supported":         []string{resource + "/.default", "openid", "profile", "offline_access"},
+		"bearer_methods_supported": []string{"header"},
+	}))
+	doc := entraMetadata(p.URL)
+	doc["issuer"] = "https://login.example.com/{tenantid}/v2.0"
+	p.route("/organizations/v2.0/.well-known/openid-configuration", serveJSON(doc))
+
+	cfg := loginConfig(t, p, entraSettings(freePort(t)))
+	cfg.ServerURL = resource
+	out := &bytes.Buffer{}
+	cfg.Out = out
+	tokens, err := Login(cfg)
+	if err != nil {
+		t.Fatalf("Login: %v\n%s", err, out)
+	}
+	if tokens.RefreshToken == "" {
+		t.Error("no refresh token was kept")
+	}
+
+	// The server's scopes, as it listed them: offline_access is there once.
+	wantScope := resource + "/.default openid profile offline_access"
+	if got := p.authorizeReq.Get("scope"); got != wantScope {
+		t.Errorf("authorize scope = %q, want %q", got, wantScope)
+	}
+	if p.hitsOn("/.well-known/oauth-protected-resource") != 0 {
+		t.Error("the root well-known location was asked although the challenge named the metadata")
+	}
+	for _, line := range []string{
+		"Authorization server: " + p.URL + "/organizations/v2.0 (named by " + p.URL + metadataPath + ")\n",
+		"Client: entra-client (the pre-registered one from the configuration)\n",
+		"Scopes: " + wantScope + " (from the server's metadata)\n",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("output lacks %q:\n%s", line, out)
+		}
+	}
+}
+
 // What is written in the configuration is what is sent: configured scopes are
 // used as they are, with nothing added.
 func TestConfiguredScopesAreSentAsWritten(t *testing.T) {
