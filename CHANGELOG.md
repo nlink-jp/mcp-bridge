@@ -4,7 +4,16 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-17
+
+Connecting to MCP servers protected by Microsoft Entra ID (ADR-0006). No login
+against an Entra ID tenant has been run; the
+[Entra ID guide](docs/en/reference/entra-setup.md) says what was checked.
+
+Existing configurations are read as before. For `"oauth": {}` the login can
+behave differently, in the ways listed under Changed: the scopes requested, the
+check that a server's metadata is its own, and the `https` condition on
+discovered URLs.
 
 ### Added
 
@@ -52,9 +61,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   for a server configured with an `https` url now stops the session with the
   login command to run, instead of receiving the refresh token.
 - **Text from a server reaches the terminal without its control characters.**
-  The output of `login` and `inspect`, the log of `run`, and the error a command ends with, can
-  quote what a server returned; control characters other than newline and tab,
-  and bidirectional controls, are removed as they are written.
+  The output of `login` and `inspect`, the log of `run`, and the error a
+  command ends with, can quote what a server returned; control characters
+  other than newline and tab, and bidirectional controls, are removed as they
+  are written.
 - **A session no longer pairs a stored client secret with a configured
   `clientId`.** The secret a dynamic registration left behind is sent only
   with the client ID stored beside it.
@@ -251,6 +261,7 @@ endpoint.
 - Out of scope by decision, not omission: governance gates, audit receipts,
   telemetry export, tool masking, and the client_credentials flow.
 
+[0.3.0]: https://github.com/nlink-jp/mcp-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nlink-jp/mcp-bridge/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/nlink-jp/mcp-bridge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nlink-jp/mcp-bridge/releases/tag/v0.1.0
