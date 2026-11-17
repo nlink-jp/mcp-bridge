@@ -160,3 +160,20 @@ func TestListTakesNoArguments(t *testing.T) {
 		t.Errorf("list with an argument should be rejected, got %v", err)
 	}
 }
+
+// The error a command ends with can quote what a server sent, and is the last
+// thing written to the terminal. It goes out without control characters, and
+// a usage error — already explained by the usage text — is not repeated.
+func TestFinalErrorIsPrintable(t *testing.T) {
+	var out bytes.Buffer
+	reportError(&out, errors.New("the provider refused authorization: access_denied: \x1b[2Jcleared ‮right-to-left"))
+	if got, want := out.String(), "mcp-bridge: the provider refused authorization: access_denied: [2Jcleared right-to-left\n"; got != want {
+		t.Errorf("printed %q, want %q", got, want)
+	}
+
+	out.Reset()
+	reportError(&out, errUsage)
+	if out.Len() != 0 {
+		t.Errorf("a usage error printed a second diagnostic: %q", out.String())
+	}
+}

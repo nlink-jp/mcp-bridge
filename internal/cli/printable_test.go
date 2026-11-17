@@ -92,3 +92,30 @@ func TestInspectOutputCarriesNoControlCharactersFromTheServer(t *testing.T) {
 		t.Errorf("the server name is missing:\n%s", out.String())
 	}
 }
+
+// A session's log quotes what the server sends, and goes to a terminal when
+// the bridge is run by hand. The JSON-RPC stream itself is not touched.
+func TestSessionLogCarriesNoControlCharactersFromTheServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, "not json \x1b[2J\x1b]0;owned\x07")
+	}))
+	defer srv.Close()
+	cfg := writeConfig(t, fmt.Sprintf(`{"servers":{"s":{"url":%q}}}`, srv.URL))
+
+	var out, logs bytes.Buffer
+	err := Run(RunOptions{
+		ConfigPath: cfg, Server: "s",
+		In:  strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}` + "\n"),
+		Out: &out, Logs: &logs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "not json") {
+		t.Fatalf("the server's text never reached the log, so nothing was tested:\n%s", logs.String())
+	}
+	if strings.ContainsAny(logs.String(), "\x1b\x07") {
+		t.Errorf("a control character reached the log: %q", logs.String())
+	}
+}

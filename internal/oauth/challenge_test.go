@@ -91,6 +91,26 @@ func TestBearerParam(t *testing.T) {
 			"scope", "later",
 		},
 		{
+			"a value of only whitespace counts as absent too",
+			[]string{`Bearer scope=" "`, `Bearer scope="later"`},
+			"scope", "later",
+		},
+		{
+			"a parameter given twice makes the line malformed",
+			[]string{`Bearer scope="a", scope="b"`, `Bearer scope="next line"`},
+			"scope", "next line",
+		},
+		{
+			"twice under different case is still twice",
+			[]string{`Bearer resource_metadata="https://a.example.com/", Resource_Metadata="https://b.example.com/"`},
+			"resource_metadata", "",
+		},
+		{
+			"the same name in two challenges is not a repeat",
+			[]string{`Basic realm="x", Bearer realm="y", scope="a"`},
+			"scope", "a",
+		},
+		{
 			"a bare scheme",
 			[]string{`Bearer`},
 			"scope", "",

@@ -150,13 +150,19 @@ func defaultHTTPClient() *http.Client {
 // stop at the first hop (the rule ADR-0005 set for a pinned connection).
 func refuseDowngrade(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
-		return fmt.Errorf("stopped after 10 redirects")
+		return &redirectError{"stopped after 10 redirects"}
 	}
 	if via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
-		return fmt.Errorf("refusing a redirect from https to %s://%s", req.URL.Scheme, req.URL.Host)
+		return &redirectError{fmt.Sprintf("refusing a redirect from https to %s://%s", req.URL.Scheme, req.URL.Host)}
 	}
 	return nil
 }
+
+// redirectError is a redirect this client would not follow. It marks a failed
+// request as one the server did answer.
+type redirectError struct{ reason string }
+
+func (e *redirectError) Error() string { return e.reason }
 
 func orDash(s string) string {
 	if s == "" {

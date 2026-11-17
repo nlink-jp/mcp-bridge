@@ -101,6 +101,13 @@ func (r discoveryRequest) allowHTTP() bool {
 	return err == nil && u.Scheme == "http"
 }
 
+// CheckDiscoveredURL applies the condition on discovered URLs to one read back
+// from a stored discovery result, for the server at serverURL. What an earlier
+// version stored was not checked when it was stored.
+func CheckDiscoveredURL(rawURL, serverURL string) error {
+	return checkDiscoveredURL(rawURL, discoveryRequest{serverURL: serverURL}.allowHTTP())
+}
+
 // checkDiscoveredURL decides whether a URL that discovery was handed — by the
 // server's challenge or by a metadata document — may be used.
 func checkDiscoveredURL(rawURL string, allowHTTP bool) error {
@@ -241,6 +248,9 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 		}
 	}
 
+	// The server's own scopes hold whichever authorization server ends up
+	// being used, so they outlive a failure to reach the one it named.
+	var resourceScopes []string
 	for _, candidate := range candidates {
 		resource, err := fetchResourceMetadata(req, candidate)
 		if mismatch := (*resourceMismatchError)(nil); errors.As(err, &mismatch) {
@@ -253,6 +263,7 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 			attempts = append(attempts, fmt.Sprintf("protected resource metadata at %s: %v", candidate, err))
 			continue
 		}
+		resourceScopes = resource.ScopesSupported
 		issuer := resource.AuthorizationServers[0]
 		meta, err := fetchAuthServerMetadata(req, issuer)
 		if err != nil {
@@ -285,7 +296,7 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 		return nil, fmt.Errorf("could not discover the authorization server. %s\nTried:\n  - %s",
 			remedy, strings.Join(attempts, "\n  - "))
 	}
-	return &located{meta: meta, issuer: origin, challengeScopes: probe.scopes}, nil
+	return &located{meta: meta, issuer: origin, challengeScopes: probe.scopes, resourceScopes: resourceScopes}, nil
 }
 
 // probed is what the server's answer to an unauthenticated request said.
@@ -312,7 +323,9 @@ func probeChallenge(req discoveryRequest) (probed, error) {
 
 	resp, err := req.client.Do(httpReq)
 	if err != nil {
-		return probed{}, err
+		// A redirect this client refused is still an answer from the server.
+		var refused *redirectError
+		return probed{reached: errors.As(err, &refused)}, err
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxMetadataBytes))
 	resp.Body.Close()
@@ -414,7 +427,7 @@ func resourceMetadataURLs(serverURL string) ([]string, error) {
 // those clients connect to (ADR-0006).
 func resourceMatches(resource, serverURL string) bool {
 	r, err := url.Parse(resource)
-	if err != nil || r.Host == "" || r.Fragment != "" {
+	if err != nil || r.Host == "" || r.Fragment != "" || r.User != nil {
 		return false
 	}
 	s, err := url.Parse(serverURL)
@@ -424,8 +437,10 @@ func resourceMatches(resource, serverURL string) bool {
 	if r.Scheme != s.Scheme || !strings.EqualFold(r.Hostname(), s.Hostname()) || portOf(r) != portOf(s) {
 		return false
 	}
-	resourcePath := strings.TrimSuffix(r.Path, "/")
-	serverPath := strings.TrimSuffix(s.Path, "/")
+	// The paths are compared as written, not decoded: an encoded slash is part
+	// of a segment's name, and decoding it would let "/a%2Fb" pass for "/a/b".
+	resourcePath := strings.TrimSuffix(r.EscapedPath(), "/")
+	serverPath := strings.TrimSuffix(s.EscapedPath(), "/")
 	return resourcePath == serverPath || strings.HasPrefix(serverPath, resourcePath+"/")
 }
 

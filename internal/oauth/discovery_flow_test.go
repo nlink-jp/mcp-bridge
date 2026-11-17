@@ -96,6 +96,12 @@ func TestMetadataIsFoundAtTheWellKnownLocations(t *testing.T) {
 			http.NotFound,
 			[]string{"/.well-known/oauth-protected-resource/mcp"},
 		},
+		{
+			"at the root, when the server does not challenge at all",
+			"/.well-known/oauth-protected-resource",
+			http.NotFound,
+			[]string{"/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -428,6 +434,53 @@ func TestTwoServersShareAClientAndAPort(t *testing.T) {
 		if !ok || stored.ServerURL != c.p.URL+"/mcp" || stored.TokenURL != c.p.URL+"/token" {
 			t.Errorf("%s: stored result is not its own: %+v", name, stored)
 		}
+	}
+}
+
+// A server that answers the probe with redirects this client will not follow
+// has answered. Its metadata may still be at a well-known location, so
+// discovery goes on, as it does for any answer that is not a challenge.
+func TestRefusedRedirectOnTheProbeIsAnAnswer(t *testing.T) {
+	p := newFakeProvider(t)
+	p.publishes("/.well-known/oauth-protected-resource/mcp", []string{"from-metadata"})
+	p.route("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/mcp", http.StatusFound) // forever
+	})
+
+	cfg := loginConfig(t, p, Settings{})
+	cfg.HTTPClient = defaultHTTPClient()
+	if _, err := Login(cfg); err != nil {
+		t.Fatalf("an endlessly redirecting probe ended discovery: %v", err)
+	}
+	if got := p.authorizeReq.Get("scope"); got != "from-metadata" {
+		t.Errorf("scope = %q: the well-known metadata was not used", got)
+	}
+}
+
+// The scopes a server lists are its own, whichever authorization server ends
+// up issuing the token. When the one it names cannot be found and the one on
+// its own host can, the server's scopes still come before that server's list.
+func TestServersScopesSurviveAFallbackToItsOwnHost(t *testing.T) {
+	p := newFakeProvider(t)
+	const meta = "/.well-known/oauth-protected-resource/mcp"
+	p.route("/mcp", challengeWith(`Bearer resource_metadata="`+p.URL+meta+`"`))
+	p.route(meta, serveJSON(map[string]any{
+		"resource":              p.URL + "/mcp",
+		"authorization_servers": []string{p.URL + "/no-such-tenant"},
+		"scopes_supported":      []string{"res.scope"},
+	}))
+
+	cfg := loginConfig(t, p, Settings{})
+	out := &bytes.Buffer{}
+	cfg.Out = out
+	if _, err := Login(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.authorizeReq.Get("scope"); got != "res.scope" {
+		t.Errorf("scope = %q, want the server's own", got)
+	}
+	if want := "Scopes: res.scope (from the server's metadata)\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
 	}
 }
 

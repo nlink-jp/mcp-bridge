@@ -253,3 +253,77 @@ func TestSessionDoesNotUseTheCallbackPort(t *testing.T) {
 		}
 	}
 }
+
+// A stored token endpoint was discovered once, and is held to the condition
+// discovery applies. An earlier version stored whatever it was handed; a
+// refresh sent there would carry the refresh token and the client's secret
+// over http on behalf of an https server.
+func TestSessionRefusesAStoredHTTPTokenEndpointForAnHTTPSServer(t *testing.T) {
+	var hits int
+	var mu sync.Mutex
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"leaked","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer plain.Close()
+
+	cfg := writeConfig(t, `{"servers":{"s":{"url":"https://mcp.example.com/mcp","oauth":{}}}}`)
+	if _, err := config.EnsureStateDir("s"); err != nil {
+		t.Fatal(err)
+	}
+	discoveryPath, _ := config.DiscoveryPath("s")
+	// The stored form of an earlier version: no server_url, nothing checked.
+	old := fmt.Sprintf(`{"authorize_url":"https://auth.example.com/a","token_url":%q,"client_id":"old-dcr","client_secret":"old-secret"}`,
+		plain.URL+"/token")
+	if err := os.WriteFile(discoveryPath, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tokensPath, _ := config.TokensPath("s")
+	expired := &oauth.Tokens{AccessToken: "old", RefreshToken: "the-refresh", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
+	if err := oauth.SaveTokens(tokensPath, expired); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Run(RunOptions{ConfigPath: cfg, Server: "s", In: strings.NewReader(""), Out: &bytes.Buffer{}, Logs: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("the session started with an http token endpoint for an https server")
+	}
+	for _, want := range []string{"is not https", "mcp-bridge login s"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not contain %q: %v", want, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Errorf("%d requests reached the http token endpoint", hits)
+	}
+}
+
+// For a server configured with an http url the same stored endpoint is what
+// discovery would accept today, and keeps working.
+func TestSessionKeepsAStoredHTTPTokenEndpointForAnHTTPServer(t *testing.T) {
+	e := newEntraLike(t)
+	cfg := writeConfig(t, fmt.Sprintf(`{"servers":{"s":{"url":%q,"oauth":{"clientId":"entra-client"}}}}`, e.URL+"/mcp"))
+	srv, err := loadServer(cfg, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.EnsureStateDir("s"); err != nil {
+		t.Fatal(err)
+	}
+	discoveryPath, _ := config.DiscoveryPath("s")
+	if err := os.WriteFile(discoveryPath, []byte(fmt.Sprintf(`{"token_url":%q}`, e.URL+"/token")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tokensPath, _ := config.TokensPath("s")
+	if err := oauth.SaveTokens(tokensPath, &oauth.Tokens{AccessToken: "stored"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := oauthProvider(srv, "s", &bytes.Buffer{}); err != nil {
+		t.Errorf("a stored http endpoint for an http server was refused: %v", err)
+	}
+}

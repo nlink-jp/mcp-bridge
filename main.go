@@ -46,12 +46,19 @@ var errUsage = errors.New("usage")
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		if !errors.Is(err, errUsage) {
-			// An error can quote what a server sent; see cli.Printable.
-			fmt.Fprintf(os.Stderr, "mcp-bridge: %s\n", cli.Printable(err.Error()))
-		}
+		reportError(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// reportError prints the error a command ended with. An error can quote what
+// a server sent, so it goes out through cli.Printable like the rest of what
+// reaches the terminal.
+func reportError(w io.Writer, err error) {
+	if errors.Is(err, errUsage) {
+		return
+	}
+	fmt.Fprintf(w, "mcp-bridge: %s\n", cli.Printable(err.Error()))
 }
 
 // run dispatches a command line. I/O is injected so the whole surface is

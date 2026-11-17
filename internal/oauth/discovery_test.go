@@ -381,6 +381,13 @@ func TestResourceMatches(t *testing.T) {
 		{"http://mcp.example.com/agents", server, false},
 		{"https://mcp.example.com:8443/agents", server, false},
 		{"https://mcp.example.com/agents#frag", server, false},
+		// An encoded slash is part of a segment's name, on either side.
+		{"https://mcp.example.com/rm/a", "https://mcp.example.com/rm/a%2Fb/mcp", false},
+		{"https://mcp.example.com/rm/a%2Fb", "https://mcp.example.com/rm/a/b", false},
+		{"https://mcp.example.com/rm/a%2Fb", "https://mcp.example.com/rm/a%2Fb/mcp", true},
+		// Credentials have no place in a resource identifier.
+		{"https://user:pw@mcp.example.com/agents", server, false},
+		{"https://mcp.example.com@evil.example.net/agents", server, false},
 		// Not a resource identifier at all.
 		{"api://11111111-2222-3333-4444-555555555555", server, false},
 		{"/agents", server, false},
@@ -454,5 +461,51 @@ func TestChooseScopes(t *testing.T) {
 				t.Errorf("the input was modified: %v", tc.resource)
 			}
 		})
+	}
+}
+
+// The condition holds for every URL discovery is handed, not only the ones in
+// the authorization server's metadata: the pointer in the challenge, and the
+// registration endpoint.
+func TestHTTPSServerCannotPointItsMetadataAtHTTP(t *testing.T) {
+	var plainHits int
+	plain := httptest.NewServer(counting(&plainHits, http.NotFoundHandler()))
+	defer plain.Close()
+
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+plain.URL+`/prm"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer secure.Close()
+
+	req := discoveryRequest{serverURL: secure.URL + "/mcp", client: secure.Client(), out: &bytes.Buffer{}}
+	_, err := findAuthServer(req)
+	if err == nil || !strings.Contains(err.Error(), plain.URL+"/prm is not https") {
+		t.Fatalf("expected the http metadata URL to be refused and listed, got %v", err)
+	}
+	if plainHits != 0 {
+		t.Errorf("%d requests reached the http URL", plainHits)
+	}
+}
+
+func TestHTTPSServerCannotNameAnHTTPRegistrationEndpoint(t *testing.T) {
+	var plainHits int
+	plain := httptest.NewServer(counting(&plainHits, http.NotFoundHandler()))
+	defer plain.Close()
+
+	req := discoveryRequest{serverURL: "https://mcp.example.com/mcp", client: plain.Client(), out: &bytes.Buffer{}}
+	_, _, err := registerClient(req, &authServerMetadata{
+		Issuer:               "https://auth.example.com",
+		RegistrationEndpoint: plain.URL + "/register",
+	})
+	if err == nil || !strings.Contains(err.Error(), "is not https") {
+		t.Fatalf("expected the http registration endpoint to be refused, got %v", err)
+	}
+	if plainHits != 0 {
+		t.Errorf("%d registration requests reached the http URL", plainHits)
 	}
 }

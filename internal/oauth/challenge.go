@@ -9,11 +9,23 @@ type challenge struct {
 	params map[string]string
 }
 
+// set records a parameter, and reports false when the challenge already has
+// one of that name: a parameter may occur once (RFC 9110 §11.2), and choosing
+// between two values would be choosing for whoever wrote the second.
+func (c *challenge) set(name, value string) bool {
+	name = strings.ToLower(name)
+	if _, dup := c.params[name]; dup {
+		return false
+	}
+	c.params[name] = value
+	return true
+}
+
 // bearerParam returns a parameter of the server's Bearer challenge, or "" when
 // there is none.
 //
 // The header values are taken in order and the first Bearer challenge that
-// carries a non-empty value for the name wins. A value that does not fit the
+// carries a value for the name that is more than whitespace wins. A value that does not fit the
 // header's grammar is skipped whole rather than read approximately: this is
 // where a hostile or broken server chooses what the login is told.
 func bearerParam(headerValues []string, name string) string {
@@ -27,7 +39,7 @@ func bearerParam(headerValues []string, name string) string {
 			if !strings.EqualFold(c.scheme, "Bearer") {
 				continue
 			}
-			if v := c.params[name]; v != "" {
+			if v := strings.TrimSpace(c.params[name]); v != "" {
 				return v
 			}
 		}
@@ -76,8 +88,7 @@ func parseChallenges(value string) ([]challenge, bool) {
 			if !ok {
 				return nil, false
 			}
-			out[len(out)-1].params[strings.ToLower(first)] = value
-			if !s.atItemEnd() {
+			if !s.atItemEnd() || !out[len(out)-1].set(first, value) {
 				return nil, false
 			}
 			continue
@@ -99,7 +110,7 @@ func parseChallenges(value string) ([]challenge, bool) {
 			s.skipSpaces()
 			if s.peek() == '=' {
 				if value, ok := s.paramValue(); ok && s.atItemEnd() {
-					c.params[strings.ToLower(name)] = value
+					c.set(name, value)
 					out = append(out, c)
 					continue
 				}

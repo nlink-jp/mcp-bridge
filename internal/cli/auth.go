@@ -134,6 +134,16 @@ func oauthProvider(srv *config.Server, name string, logs io.Writer) (*oauth.Prov
 			return nil, fmt.Errorf("server %q has no OAuth endpoints configured and nothing was discovered yet: run \"mcp-bridge login %s\"", name, name)
 		}
 		if cfg.TokenURL == "" {
+			// The stored endpoint was discovered, and is held to the condition
+			// discovery applies: an earlier version stored whatever it was
+			// handed, and the refresh request carries the refresh token and
+			// the client's secret.
+			if discovered.TokenURL != "" {
+				if err := oauth.CheckDiscoveredURL(discovered.TokenURL, srv.URL); err != nil {
+					return nil, fmt.Errorf("the token endpoint stored for %q cannot be used: %w (run \"mcp-bridge login %s\" to discover it again)",
+						name, err, name)
+				}
+			}
 			cfg.TokenURL = discovered.TokenURL
 		}
 		// A stored secret belongs to the client it was issued with. When the

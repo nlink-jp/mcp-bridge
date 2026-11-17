@@ -43,8 +43,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   The stored result now records the `url`, and one stored for another `url`,
   or by an earlier version, is not reused. A login that reused a registration
   through `--callback-port` registers once more after the update.
+- **A server that does not answer is reported as unreachable.** Discovery went
+  on to ask the well-known locations on the same host and ended with "could
+  not discover the authorization server" over the same connection error
+  several times. It now stops with `could not reach <url>`.
+- **A session refuses a stored token endpoint that discovery would refuse.**
+  The endpoint an earlier version stored was not checked; one that is `http`
+  for a server configured with an `https` url now stops the session with the
+  login command to run, instead of receiving the refresh token.
 - **Text from a server reaches the terminal without its control characters.**
-  The output of `login` and `inspect`, and the error a command ends with, can
+  The output of `login` and `inspect`, the log of `run`, and the error a command ends with, can
   quote what a server returned; control characters other than newline and tab,
   and bidirectional controls, are removed as they are written.
 - **A session no longer pairs a stored client secret with a configured

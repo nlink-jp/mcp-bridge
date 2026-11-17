@@ -23,6 +23,11 @@ type RunOptions struct {
 // Run bridges the client on In/Out to the configured upstream server, and
 // returns when the client closes its input.
 func Run(opts RunOptions) error {
+	// The log quotes what the server sends — a message that is not JSON, an
+	// error body — and it is a terminal's as often as a client's log file.
+	// Out is the JSON-RPC stream and is passed through untouched.
+	opts.Logs = printable(opts.Logs)
+
 	srv, err := loadServer(opts.ConfigPath, opts.Server)
 	if err != nil {
 		return err
