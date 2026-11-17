@@ -244,6 +244,10 @@ host, and a client is registered dynamically (RFC 7591). The result is cached
 per server, so a fixed callback port reuses one registration instead of
 creating a new client record on the provider at every login.
 
+A URL that discovery is handed is used only if it is `https`, unless the
+configured `url` is itself `http`. The login and the token refresh do not
+follow a redirect from `https` to anything else.
+
 **The https callback.** Some providers — Slack in particular — reject an
 `http://` loopback redirect URI when the OAuth app is registered. Setting
 `"callbackScheme": "https"` makes the listener present an ephemeral

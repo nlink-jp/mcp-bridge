@@ -143,3 +143,160 @@ func TestMetadataFailureListsEveryLocation(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveredURLCondition(t *testing.T) {
+	cases := []struct {
+		url       string
+		allowHTTP bool
+		ok        bool
+	}{
+		{"https://auth.example.com/token", false, true},
+		{"https://auth.example.com/token", true, true},
+		{"http://auth.example.com/token", true, true},
+		{"http://auth.example.com/token", false, false},
+		// Loopback is no exception: an https server must not be able to aim
+		// requests at whatever listens on the user's own machine.
+		{"http://127.0.0.1:8080/token", false, false},
+		{"http://localhost/token", false, false},
+		{"ftp://auth.example.com/token", true, false},
+		{"/token", true, false},
+		{"", true, false},
+		{"https:///token", true, false},
+	}
+	for _, tc := range cases {
+		err := checkDiscoveredURL(tc.url, tc.allowHTTP)
+		if (err == nil) != tc.ok {
+			t.Errorf("checkDiscoveredURL(%q, allowHTTP=%v) = %v, want ok=%v", tc.url, tc.allowHTTP, err, tc.ok)
+		}
+	}
+}
+
+// counting wraps a handler and counts the requests that reach it.
+func counting(n *int, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*n++
+		h.ServeHTTP(w, r)
+	})
+}
+
+// An https server that names an http authorization server gets no request sent
+// there at all.
+func TestHTTPSServerCannotNameAnHTTPAuthorizationServer(t *testing.T) {
+	var hits int
+	plain := httptest.NewServer(counting(&hits, http.NotFoundHandler()))
+	defer plain.Close()
+
+	req := discoveryRequest{serverURL: "https://mcp.example.com/mcp", client: plain.Client(), out: &bytes.Buffer{}}
+	_, err := fetchAuthServerMetadata(req, plain.URL)
+	if err == nil || !strings.Contains(err.Error(), "is not https") {
+		t.Fatalf("expected the http issuer to be refused, got %v", err)
+	}
+	if hits != 0 {
+		t.Errorf("%d requests reached the http authorization server", hits)
+	}
+}
+
+// The same holds one step later: https metadata that names an http token
+// endpoint is not usable.
+func TestHTTPSMetadataCannotNameAnHTTPEndpoint(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                 srv.URL,
+			"authorization_endpoint": srv.URL + "/authorize",
+			"token_endpoint":         "http://auth.example.com/token",
+		})
+	}))
+	defer srv.Close()
+
+	req := discoveryRequest{serverURL: srv.URL + "/mcp", client: srv.Client(), out: &bytes.Buffer{}}
+	_, err := fetchAuthServerMetadata(req, srv.URL)
+	if err == nil || !strings.Contains(err.Error(), "http://auth.example.com/token is not https") {
+		t.Fatalf("expected the http token endpoint to be refused, got %v", err)
+	}
+}
+
+// downgradeFixture is an https server that redirects every request to a plain
+// http one, and a client that trusts the former and applies the production
+// redirect rule.
+func downgradeFixture(t *testing.T, status int) (httpsURL string, client *http.Client, plainHits *int) {
+	t.Helper()
+	hits := new(int)
+	plain := httptest.NewServer(counting(hits, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"leaked","authorization_endpoint":"https://x.example.com/a","token_endpoint":"https://x.example.com/t"}`))
+	})))
+	t.Cleanup(plain.Close)
+
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, status)
+	}))
+	t.Cleanup(secure.Close)
+
+	client = defaultHTTPClient()
+	client.Transport = secure.Client().Transport
+	return secure.URL, client, hits
+}
+
+func TestMetadataFetchDoesNotFollowARedirectOffHTTPS(t *testing.T) {
+	httpsURL, client, plainHits := downgradeFixture(t, http.StatusFound)
+
+	req := discoveryRequest{serverURL: httpsURL + "/mcp", client: client, out: &bytes.Buffer{}}
+	var into map[string]any
+	err := getJSON(req, httpsURL+"/.well-known/openid-configuration", &into)
+	if err == nil || !strings.Contains(err.Error(), "refusing a redirect from https to http://") {
+		t.Fatalf("expected the redirect to be refused, got %v", err)
+	}
+	if *plainHits != 0 {
+		t.Errorf("%d requests followed the redirect to http", *plainHits)
+	}
+}
+
+// The token request holds the authorization code and the PKCE verifier (or a
+// refresh token and a client secret), so no form of redirect may carry it off
+// https. A 302 would be followed as a bodiless GET and is refused by the rule;
+// a 307 asks for the form again, which the request cannot replay, so Go hands
+// the 307 back and the exchange fails on it. Either way nothing reaches http.
+func TestTokenRequestDoesNotFollowARedirectOffHTTPS(t *testing.T) {
+	for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		httpsURL, client, plainHits := downgradeFixture(t, status)
+
+		tokens, err := exchange(tokenRequest{
+			client:   client,
+			tokenURL: httpsURL + "/token",
+			form:     map[string][]string{"grant_type": {"authorization_code"}, "code": {"the-code"}},
+			clientID: "id",
+		})
+		if err == nil {
+			t.Errorf("HTTP %d: the exchange succeeded with %+v", status, tokens)
+		}
+		if *plainHits != 0 {
+			t.Errorf("HTTP %d: %d requests followed the redirect to http", status, *plainHits)
+		}
+		if status == http.StatusFound && !strings.Contains(err.Error(), "refusing a redirect from https to http://") {
+			t.Errorf("HTTP %d: error does not name the refused redirect: %v", status, err)
+		}
+	}
+}
+
+// An http server stays on Go's default: its redirects are followed.
+func TestHTTPRedirectsAreStillFollowed(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+	hop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer hop.Close()
+
+	req := discoveryRequest{serverURL: hop.URL + "/mcp", client: defaultHTTPClient(), out: &bytes.Buffer{}}
+	var into map[string]any
+	if err := getJSON(req, hop.URL+"/meta", &into); err != nil {
+		t.Fatal(err)
+	}
+	if into["ok"] != true {
+		t.Errorf("redirect was not followed: %v", into)
+	}
+}

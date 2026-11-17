@@ -64,6 +64,36 @@ type discoveryRequest struct {
 	out         io.Writer
 }
 
+// allowHTTP reports whether discovery may use http URLs: only when the
+// configured server is itself http. Whoever wrote that URL chose an
+// unencrypted server, and its authorization server may be the same kind. An
+// https server gets no such latitude, or one response from it could move the
+// authorization code and the tokens onto a connection anyone on the path can
+// read (ADR-0006).
+func (r discoveryRequest) allowHTTP() bool {
+	u, err := url.Parse(r.serverURL)
+	return err == nil && u.Scheme == "http"
+}
+
+// checkDiscoveredURL decides whether a URL that discovery was handed — by the
+// server's challenge or by a metadata document — may be used.
+func checkDiscoveredURL(rawURL string, allowHTTP bool) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("%q is not an absolute URL", rawURL)
+	}
+	switch {
+	case u.Scheme == "https":
+		return nil
+	case u.Scheme == "http" && allowHTTP:
+		return nil
+	case u.Scheme == "http":
+		return fmt.Errorf("%s is not https, and only a server configured with an http url may name an http one", rawURL)
+	default:
+		return fmt.Errorf("%s is neither https nor http", rawURL)
+	}
+}
+
 // discover finds a server's OAuth endpoints and obtains a client for them.
 //
 // A cached registration is reused when it was made for the same redirect URI.
@@ -226,6 +256,13 @@ func fetchAuthServerMetadata(req discoveryRequest, issuer string) (*authServerMe
 			problems = append(problems, fmt.Sprintf("%s: metadata names no authorization or token endpoint", candidate))
 			continue
 		}
+		if err := firstError(
+			checkDiscoveredURL(meta.AuthorizationEndpoint, req.allowHTTP()),
+			checkDiscoveredURL(meta.TokenEndpoint, req.allowHTTP()),
+		); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", candidate, err))
+			continue
+		}
 		return &meta, nil
 	}
 	return nil, fmt.Errorf("%s", strings.Join(problems, "; "))
@@ -268,6 +305,10 @@ func registerClient(req discoveryRequest, meta *authServerMetadata) (clientID, c
 			"Register an OAuth app with the provider and configure oauth.authorizeUrl, oauth.tokenUrl, "+
 			"oauth.clientId and oauth.clientSecret explicitly — that is what mcp-bridge is for",
 			orDash(meta.Issuer))
+	}
+
+	if err := checkDiscoveredURL(meta.RegistrationEndpoint, req.allowHTTP()); err != nil {
+		return "", "", fmt.Errorf("the registration endpoint cannot be used: %w", err)
 	}
 
 	fmt.Fprintln(req.out, "Registering a client with the authorization server...")
@@ -314,6 +355,9 @@ func registerClient(req discoveryRequest, meta *authServerMetadata) (clientID, c
 
 // getJSON fetches and decodes one discovery document.
 func getJSON(req discoveryRequest, rawURL string, into any) error {
+	if err := checkDiscoveredURL(rawURL, req.allowHTTP()); err != nil {
+		return err
+	}
 	resp, err := req.client.Get(rawURL)
 	if err != nil {
 		return err
@@ -328,6 +372,16 @@ func getJSON(req discoveryRequest, rawURL string, into any) error {
 	}
 	if err := json.Unmarshal(body, into); err != nil {
 		return fmt.Errorf("not valid JSON metadata")
+	}
+	return nil
+}
+
+// firstError returns the first non-nil error.
+func firstError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

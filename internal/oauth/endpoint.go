@@ -139,7 +139,23 @@ func describeOAuthError(body []byte) string {
 // defaultHTTPClient bounds every OAuth call. These are short request/response
 // exchanges with no streaming, so one whole-request timeout is right.
 func defaultHTTPClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{Timeout: 30 * time.Second, CheckRedirect: refuseDowngrade}
+}
+
+// refuseDowngrade stops a redirect that leaves https.
+//
+// These requests carry an authorization code, a PKCE verifier, a client secret
+// or a refresh token, and Go resends the body of a 307 or 308. A discovered
+// URL is checked for https before it is used; without this the check would
+// stop at the first hop (the rule ADR-0005 set for a pinned connection).
+func refuseDowngrade(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
+	if via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing a redirect from https to %s://%s", req.URL.Scheme, req.URL.Host)
+	}
+	return nil
 }
 
 func orDash(s string) string {

@@ -28,6 +28,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Discovery uses only `https` URLs, unless the configured `url` is `http`.**
+  An `https` server could name an `http` authorization or token endpoint and
+  the login would use it, sending the authorization code and the tokens in the
+  clear. Such a URL is now refused. The login's and the refresh's requests
+  also stop following a redirect from `https` to anything else. A server
+  configured with an `http` url behaves as before.
 - `make package` runs `govulncheck ./...` first (`make vuln`) and stops on a
   finding, so a release cannot be built past one.
 - `make vuln` — and so `make package` — scans every platform in `PLATFORMS`,
