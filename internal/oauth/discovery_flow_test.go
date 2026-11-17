@@ -330,6 +330,29 @@ func TestLoginWithAPreRegisteredClientAndDiscoveredEndpoints(t *testing.T) {
 	}
 }
 
+// The authorization server is shown as the server named it. Entra ID's common
+// endpoint publishes an issuer holding the placeholder "{tenantid}" (measured
+// 2026-11-17), which would tell the reader nothing about where the login went.
+func TestAuthorizationServerIsShownAsItWasNamed(t *testing.T) {
+	p := entraShaped(t)
+	doc := entraMetadata(p.URL)
+	doc["issuer"] = "https://login.example.com/{tenantid}/v2.0"
+	p.route("/tenant-id/v2.0/.well-known/openid-configuration", serveJSON(doc))
+
+	cfg := loginConfig(t, p, entraSettings(freePort(t)))
+	out := &bytes.Buffer{}
+	cfg.Out = out
+	if _, err := Login(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Authorization server: " + p.URL + "/tenant-id/v2.0 (named by " + p.URL + "/prm)\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if strings.Contains(out.String(), "{tenantid}") {
+		t.Errorf("the placeholder issuer was shown:\n%s", out)
+	}
+}
+
 // What is written in the configuration is what is sent: configured scopes are
 // used as they are, with nothing added.
 func TestConfiguredScopesAreSentAsWritten(t *testing.T) {

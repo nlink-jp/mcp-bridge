@@ -158,13 +158,10 @@ func discover(req discoveryRequest) (*Discovered, error) {
 		RedirectURI:  req.redirectURI,
 		ServerURL:    req.serverURL,
 		report: discoveryReport{
-			issuer:  meta.Issuer,
+			issuer:  found.issuer,
 			namedBy: found.namedBy,
 			client:  clientConfigured,
 		},
-	}
-	if discovered.report.issuer == "" {
-		discovered.report.issuer = meta.AuthorizationEndpoint
 	}
 
 	if req.clientID == "" {
@@ -201,6 +198,11 @@ type authServerMetadata struct {
 // the scopes the MCP server itself asked for on the way there.
 type located struct {
 	meta *authServerMetadata
+	// issuer is the authorization server as it was named: by the server's
+	// metadata, or the server's own origin when found there. The metadata's
+	// own issuer field is not used for this — Microsoft Entra ID's common
+	// endpoint fills it with the placeholder "{tenantid}".
+	issuer string
 	// namedBy is the protected-resource metadata document that named the
 	// authorization server; empty when it was found on the server's own host.
 	namedBy         string
@@ -253,6 +255,7 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 		}
 		return &located{
 			meta:            meta,
+			issuer:          issuer,
 			namedBy:         candidate,
 			challengeScopes: probe.scopes,
 			resourceScopes:  resource.ScopesSupported,
@@ -276,7 +279,7 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 		return nil, fmt.Errorf("could not discover the authorization server. %s\nTried:\n  - %s",
 			remedy, strings.Join(attempts, "\n  - "))
 	}
-	return &located{meta: meta, challengeScopes: probe.scopes}, nil
+	return &located{meta: meta, issuer: origin, challengeScopes: probe.scopes}, nil
 }
 
 // probed is what the server's answer to an unauthenticated request said.
