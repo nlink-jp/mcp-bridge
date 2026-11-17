@@ -4,8 +4,9 @@ stdio しか話せない MCP クライアントから、**事前登録済み OAu
 Streamable HTTP MCP サーバへ接続するためのブリッジ。
 
 > 実 Slack MCP サーバ（事前登録 OAuth）と実 GitHub MCP サーバ（token command）で
-> 検証済み。GitHub Apps と Microsoft Entra ID に対する事前登録 OAuth 経路は同じ形を
-> とるため動作すると考えられますが、実エンドポイントでは未検証です。
+> 検証済み。GitHub Apps と、Microsoft Entra ID で保護されたサーバに対する事前登録 OAuth 経路は、
+> 通しでは検証していません。本物の Entra ID に対して何を確かめ、何を確かめていないかは
+> [Entra ID の手順](docs/ja/reference/entra-setup.ja.md)に書いてあります。
 
 ## 対象となる状況
 
@@ -298,6 +299,8 @@ mcp-bridge はサーバに拒否されるまでそのまま使います。ここ
 - [Slack セットアップ](docs/ja/reference/slack-setup.ja.md) — 全手順の実例。実サーバで検証済み
 - [GitHub セットアップ](docs/ja/reference/github-setup.ja.md) — GitHub に対して discovery が
   成立しない理由、成立する2経路、tool 露出の絞り方
+- [Entra ID セットアップ](docs/ja/reference/entra-setup.ja.md) — 事前登録クライアントで、
+  他はすべて discovery する構成。テナントに対しては未実行
 - [設計判断](docs/ja/adr/) — OAuth 設定を明示的にした理由 (0001)、失敗したリクエストに
   必ず応答する理由 (0002)、refresh を持たないトークンに対処可能な期限が存在しない理由 (0003)、
   設定ファイルを strict decode の JSON 1本にした理由 (0004)、機器の証明書を検証なしにせず

@@ -4,9 +4,10 @@ Connect stdio-only MCP clients to Streamable HTTP MCP servers that require a
 **pre-registered OAuth client**.
 
 > Verified against the live Slack MCP server (pre-registered OAuth) and the
-> live GitHub MCP server (token command). The pre-registered OAuth route for
-> GitHub Apps and Microsoft Entra ID presents the same shape and is expected to
-> work, but has not been exercised against a live endpoint.
+> live GitHub MCP server (token command). The pre-registered OAuth routes for
+> GitHub Apps and for servers protected by Microsoft Entra ID have not been
+> exercised end to end; the [Entra ID guide](docs/en/reference/entra-setup.md)
+> says exactly what was checked against the live Entra ID and what was not.
 
 ## Who this is for
 
@@ -317,6 +318,8 @@ reason. Where a refresh token exists, renewal is automatic.
   whole flow, verified against the live server
 - [GitHub setup](docs/en/reference/github-setup.md) — why discovery cannot work
   against GitHub, the two routes that do, and how to limit the tool surface
+- [Entra ID setup](docs/en/reference/entra-setup.md) — a pre-registered client
+  with everything else discovered; not yet run against a tenant
 - [Design decisions](docs/en/adr/) — why the OAuth settings are explicit
   (0001), why a failed request is always answered (0002), why a token with no
   refresh has no expiry we can act on (0003), why there is one strictly

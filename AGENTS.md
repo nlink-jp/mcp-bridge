@@ -17,8 +17,10 @@ direction is not supported.
 - Language: Go, standard library only (`go.mod` has zero require lines)
 - Status: released. Verified against the live Slack MCP server (pre-registered
   OAuth) and the live GitHub MCP server (token command). The pre-registered
-  OAuth route for GitHub Apps and Entra ID presents the same shape but is
-  untested against a live endpoint.
+  OAuth route for GitHub Apps is untested against a live endpoint. Entra ID is
+  not the same shape as Slack (ADR-0006): its discovery was checked against
+  the live Entra ID metadata and authorize endpoint and against GitHub's live
+  server, and no login against an Entra ID tenant has been run.
 
 ## Build and test
 
@@ -50,9 +52,9 @@ internal/tokencmd/           Bearer tokens from an external command
 internal/cli/                Subcommand bodies (run, list, login, logout, inspect)
 scripts/docs-mirror-check.sh Verifies docs/en and docs/ja are structural mirrors
 docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
-                             holds the RFP, six ADRs, the Slack and GitHub
-                             setup guides under reference/, and the design
-                             note of a release under history/
+                             holds the RFP, six ADRs, the Slack, GitHub and
+                             Entra ID setup guides under reference/, and
+                             the design note of a release under history/
 ```
 
 ## Runtime layout
@@ -96,6 +98,31 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
   authenticated connection that way. `TestHeadersAccompanyATokenCommand` pins
   it; the authentication table in the README reads as exclusive at a glance,
   which is why the note is there.
+- **An `oauth` block has three shapes**, told apart by keys and not by a mode:
+  empty (discover and register), `clientId` with both URLs (nothing
+  discovered), `clientId` with neither URL (endpoints and scopes discovered,
+  nothing registered, no `clientSecret` allowed). `AuthMode` shows the last
+  two alike, as `oauth`; `OAuth.DiscoversEndpoints` tells them apart.
+- **Three things the MCP specification asks for are left out on purpose**
+  (ADR-0006): the RFC 8707 `resource` parameter, refusing an authorization
+  server that does not advertise PKCE support, and checking the metadata's
+  `issuer`. Each would stop Microsoft Entra ID from connecting or cannot be
+  tested without a tenant. Do not "fix" them toward the specification without
+  one; `TestLoginWithAPreRegisteredClientAndDiscoveredEndpoints` and the
+  `entraMetadata` fixture pin the Entra-shaped case.
+- **Discovery trusts nothing the server hands it by default.** A discovered URL
+  must be `https` unless the configured `url` is `http`
+  (`checkDiscoveredURL`); protected-resource metadata must describe the
+  configured `url` (`resourceMatches`); the OAuth HTTP client refuses a
+  redirect off `https` (`refuseDowngrade`). A new request in the login or the
+  refresh goes through `defaultHTTPClient` or a client with the same rule.
+- **Text from a server reaches the terminal only through `cli.Printable`.**
+  `login` and `inspect` wrap their writer with `printable`, and `main` filters
+  the final error. A command that starts printing what a server said wraps its
+  writer the same way; do not escape at each `Fprintf`.
+- **`WWW-Authenticate` is parsed, not searched.** `bearerParam` reads the
+  header by its grammar (`internal/oauth/challenge.go`). Looking for
+  `scope="` in the string finds it inside another parameter's quoted text.
 - **Zero dependencies is a hard constraint**, not a preference. It is why config
   is JSON rather than the org-standard sectioned TOML.
 - **Scope is fixed by the RFP** in `docs/ja/mcp-bridge-rfp.ja.md`. Governance
