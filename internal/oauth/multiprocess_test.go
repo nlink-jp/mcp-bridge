@@ -343,6 +343,11 @@ func TestRenewalThatCouldNotBeSavedKeepsRenewing(t *testing.T) {
 			t.Errorf("logs lack %q:\n%s", want, logs.String())
 		}
 	}
+	for _, secret := range []string{"at-0", "at-1", "at-2", "rt-0", "rt-1", "rt-2"} {
+		if strings.Contains(logs.String(), secret) {
+			t.Errorf("a record carries the token value %q:\n%s", secret, logs.String())
+		}
+	}
 }
 
 // Once the file has been rewritten since the failed save (here by a new
@@ -382,6 +387,7 @@ func TestLoggingInAgainHealsARunningBridge(t *testing.T) {
 	}{
 		{"with a refresh token", Tokens{AccessToken: "login-at", RefreshToken: "login-rt", ExpiresAt: 1_800_000_000 + 5*3600}},
 		{"without a refresh token", Tokens{AccessToken: "login-at"}},
+		{"already expired", Tokens{AccessToken: "login-at-old", RefreshToken: "login-rt", ExpiresAt: 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newClock()
@@ -404,8 +410,12 @@ func TestLoggingInAgainHealsARunningBridge(t *testing.T) {
 			if err != nil {
 				t.Fatalf("after logging in again: %v", err)
 			}
-			if got != "login-at" {
-				t.Errorf("token = %q, want the new login's", got)
+			want := "login-at"
+			if tc.login.ExpiresAt == 1 {
+				want = "at-1" // renewed with the new login's refresh token
+			}
+			if got != want {
+				t.Errorf("token = %q, want %q", got, want)
 			}
 		})
 	}
@@ -520,8 +530,8 @@ func TestRenewalRecordsSayWhatHappened(t *testing.T) {
 	}
 
 	// A server that does not rotate says "kept".
-	ts := newTokenServer(t, `{"access_token":"fresh","expires_in":3600}`)
-	path := storedAt(t, &Tokens{AccessToken: "stale", RefreshToken: "r", ExpiresAt: 1})
+	ts := newTokenServer(t, `{"access_token":"kept-at-new","expires_in":3600}`)
+	path := storedAt(t, &Tokens{AccessToken: "kept-at-old", RefreshToken: "kept-rt", ExpiresAt: 1})
 	var lk bytes.Buffer
 	p, _ := NewProvider(ProviderConfig{ServerName: "m365", TokensPath: path, TokenURL: ts.URL, Logs: &lk})
 	if _, err := p.Token(); err != nil {
@@ -529,6 +539,9 @@ func TestRenewalRecordsSayWhatHappened(t *testing.T) {
 	}
 	if !strings.Contains(lk.String(), "the refresh token was kept") {
 		t.Errorf("record for a server that does not rotate: %q", lk.String())
+	}
+	if strings.Contains(lk.String(), "kept-") {
+		t.Errorf("a record carries a token value: %q", lk.String())
 	}
 }
 
@@ -547,6 +560,16 @@ func TestMain(m *testing.M) {
 
 // renewChild waits for the start file, renews once and prints the outcome.
 func renewChild() int {
+	// Like `mcp-bridge run`: read the login at start-up, then find it
+	// expired when the first request comes.
+	p, err := NewProvider(ProviderConfig{
+		ServerName: "atlassian", TokensPath: os.Getenv("CHILD_TOKENS"),
+		TokenURL: os.Getenv("CHILD_TOKEN_URL"), ClientAuthMethod: "none",
+	})
+	ready := os.Getenv("CHILD_READY")
+	if f, ferr := os.Create(ready); ferr == nil {
+		f.Close()
+	}
 	start := os.Getenv("CHILD_START")
 	for {
 		if _, err := os.Stat(start); err == nil {
@@ -554,10 +577,6 @@ func renewChild() int {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	p, err := NewProvider(ProviderConfig{
-		ServerName: "atlassian", TokensPath: os.Getenv("CHILD_TOKENS"),
-		TokenURL: os.Getenv("CHILD_TOKEN_URL"), ClientAuthMethod: "none",
-	})
 	if err == nil {
 		var tok string
 		tok, err = p.Token()
@@ -578,7 +597,8 @@ func TestRealProcessesRenewOnce(t *testing.T) {
 	path := storedAt(t, &Tokens{AccessToken: "at-0", RefreshToken: "rt-0", ExpiresAt: time.Now().Add(-time.Hour).Unix()})
 	rs := newRotatingServer(t, true, "rt-0")
 	rs.holdFirst = func() { time.Sleep(500 * time.Millisecond) }
-	startFile := filepath.Join(t.TempDir(), "start")
+	syncDir := t.TempDir()
+	startFile := filepath.Join(syncDir, "start")
 
 	const n = 6
 	outs := make([]*bytes.Buffer, n)
@@ -586,7 +606,8 @@ func TestRealProcessesRenewOnce(t *testing.T) {
 	for i := 0; i < n; i++ {
 		cmd := exec.Command(os.Args[0], "-test.run=^$")
 		cmd.Env = append(os.Environ(), childEnv+"=1",
-			"CHILD_START="+startFile, "CHILD_TOKENS="+path, "CHILD_TOKEN_URL="+rs.URL)
+			"CHILD_START="+startFile, "CHILD_READY="+filepath.Join(syncDir, fmt.Sprintf("ready-%d", i)),
+			"CHILD_TOKENS="+path, "CHILD_TOKEN_URL="+rs.URL)
 		outs[i] = &bytes.Buffer{}
 		cmd.Stdout = outs[i]
 		cmd.Stderr = os.Stderr
@@ -594,6 +615,19 @@ func TestRealProcessesRenewOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		cmds = append(cmds, cmd)
+	}
+	// Every child has read the expired login before any of them renews.
+	deadline := time.Now().Add(30 * time.Second)
+	for i := 0; i < n; i++ {
+		for {
+			if _, err := os.Stat(filepath.Join(syncDir, fmt.Sprintf("ready-%d", i))); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("child %d never got ready", i)
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
 	}
 	if err := os.WriteFile(startFile, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -609,5 +643,21 @@ func TestRealProcessesRenewOnce(t *testing.T) {
 	}
 	if got := rs.requests(); len(got) != 1 {
 		t.Errorf("renewal requests from %d processes = %v, want one", n, got)
+	}
+}
+
+// Two 401s before the next Token call must not forget which token was
+// refused.
+func TestASecondInvalidateKeepsTheRejection(t *testing.T) {
+	s := newShare(t, false)
+	p := s.provider(nil)
+	p.Invalidate()
+	p.Invalidate()
+	got, err := p.Token()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == "at-0" {
+		t.Error("the refused access token was adopted from the file")
 	}
 }

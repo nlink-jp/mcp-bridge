@@ -141,7 +141,9 @@ func (p *Provider) decideUnderLock() (string, error) {
 	disk, err := LoadTokens(p.cfg.TokensPath)
 	if err != nil {
 		// Renewing from memory here would write back a login that was
-		// logged out, or paper over a file someone edited by hand.
+		// logged out, or paper over a file someone edited by hand. Whatever
+		// replaces the file next is newer than an unsaved renewal.
+		p.unsavedFrom = ""
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("not logged in to %q (the stored login was removed): run \"mcp-bridge login %s\"", name, name)
 		}
@@ -190,7 +192,11 @@ func (p *Provider) Invalidate() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.rejected = true
-	p.rejectedAccess = p.tokens.AccessToken
+	// A second 401 before the next Token call must not forget which token
+	// was refused: that token may still be in the file.
+	if p.tokens.AccessToken != "" {
+		p.rejectedAccess = p.tokens.AccessToken
+	}
 	p.tokens.AccessToken = ""
 	p.tokens.ExpiresAt = 0
 }
