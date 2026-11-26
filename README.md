@@ -313,6 +313,20 @@ rotation is disabled — and mcp-bridge uses it until the server rejects it.
 Inventing an expiry for such a token would force a re-login every hour for no
 reason. Where a refresh token exists, renewal is automatic.
 
+**Several bridges for one server.** An MCP client starts a bridge per session
+or window, so several often run for the same server. They share its stored
+login: when the access token expires, one of them renews it under a lock
+(`tokens.json.lock` beside the token file) and the others use the result, so a
+server that issues single-use refresh tokens does not lose the login. Each
+renewal is one line on stderr — in your MCP client's log — saying when the new
+token expires and whether the server issued a new refresh token; no token is
+printed. After `mcp-bridge login`, running bridges use the new login at their
+next renewal, with no restart. If another bridge keeps the lock for more than
+45 seconds, the request fails saying so, and can be tried again. The lock may
+not work when `~/.config/mcp-bridge` is on a network file system. Bridges of
+version 0.3.0 and earlier take no lock: after upgrading, restart every MCP
+client that uses such a server.
+
 ## Documentation
 
 - [Slack setup](docs/en/reference/slack-setup.md) — a worked example of the
@@ -326,8 +340,9 @@ reason. Where a refresh token exists, renewal is automatic.
   (0001), why a failed request is always answered (0002), why a token with no
   refresh has no expiry we can act on (0003), why there is one strictly
   decoded JSON config file (0004), why a device's certificate is pinned
-  rather than left unverified (0005), and why a pre-registered client can take
-  its endpoints and scopes from what the server publishes (0006)
+  rather than left unverified (0005), why a pre-registered client can take
+  its endpoints and scopes from what the server publishes (0006), and why
+  bridges for one server renew its token one at a time (0007)
 - [RFP](docs/en/mcp-bridge-rfp.md) — the scope decision and what is
   deliberately out of it
 

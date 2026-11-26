@@ -138,6 +138,19 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
   A token with no refresh token is used as stored whatever its expiry says;
   the server is the judge, via a 401. Treating zero as expired makes Slack
   demand a fresh login every hour.
+- **`tokens.json` is the authoritative copy; a `Provider` holds a copy of it**
+  (ADR-0007). Several `run` processes for one server share the file. Whenever
+  the copy will not do, `decideUnderLock` reads the file again under
+  `tokens.json.lock` and decides from it — never renew from memory without
+  going through it, or a second process presents a spent refresh token and a
+  server with reuse detection kills the login. The one exception is
+  `unsavedFrom` (this process's renewal could not be saved). The lock file is
+  never deleted. A lock held past `lockWait` fails the request instead of
+  renewing unlocked. The tests stand several `Provider`s in for processes
+  (separate opens exclude each other), and `TestRealProcessesRenewOnce` re-runs
+  the test binary as children through `TestMain`; replacing the lock with a
+  no-op makes it and `TestSixProcessesRenewOnce` fail, which is how they were
+  checked.
 - **Outgoing stdio messages are compacted.** A server that pretty-prints its
   JSON would otherwise split one message across several lines and
   desynchronise the client for the rest of the session.

@@ -6,6 +6,38 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **Several bridges for one server no longer lose its login** (ADR-0007).
+  An MCP client starts a bridge per session or window, and each bridge kept
+  the refresh token it read at start-up. Against a server that issues
+  single-use refresh tokens — Atlassian Remote MCP was where it was reported —
+  the first bridge to renew spent that token, the others presented it again
+  and failed with `invalid_grant`, and with reuse detection the stored login
+  died with them. Renewal now happens under a lock beside the token file
+  (`tokens.json.lock`): the bridge that gets it reads the file again and
+  either uses what another bridge stored or renews with the newest refresh
+  token. Reported, analysed and reproduced by a user, with a proof of concept.
+- **Logging in again heals running bridges.** A bridge whose renewal failed
+  kept the dead refresh token until its MCP client was restarted; it now reads
+  the stored login again at its next attempt.
+- **A logged-out login is no longer written back.** A running bridge renewed
+  from memory after `mcp-bridge logout` and stored the result again; it now
+  reports that there is no login.
+
+### Added
+
+- One line on stderr for each renewal, saying when the new token expires and
+  whether the server issued a new refresh token, and one when a bridge uses
+  the renewal of another. No token value is printed.
+
+### Upgrading
+
+- Bridges of 0.3.0 and earlier take no lock. Restart every MCP client that
+  uses an OAuth server after upgrading.
+- The lock on Windows (`LockFileEx`) is built and statically checked but has
+  not been run on a Windows machine.
+
 ### Documentation
 
 - **The Entra ID route has been run against a tenant.** A user connected
