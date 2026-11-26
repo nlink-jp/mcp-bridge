@@ -89,8 +89,12 @@ func Logout(opts LogoutOptions) error {
 		return err
 	}
 	existed := fileExists(tokensPath)
-	if err := oauth.DeleteTokens(tokensPath); err != nil {
-		return err
+	warning, err := oauth.DeleteLogin(tokensPath)
+	if err != nil {
+		return fmt.Errorf("log out of %s: %w", opts.Server, err)
+	}
+	if warning != "" {
+		fmt.Fprintf(opts.Out, "Warning: %s.\n", warning)
 	}
 
 	if existed {

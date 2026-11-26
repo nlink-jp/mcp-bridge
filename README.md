@@ -322,7 +322,9 @@ renewal is one line on stderr — in your MCP client's log — saying when the n
 token expires and whether the server issued a new refresh token; no token is
 printed. After `mcp-bridge login`, running bridges use the new login at their
 next renewal, with no restart. If another bridge keeps the lock for more than
-45 seconds, the request fails saying so, and can be tried again. The lock may
+45 seconds, the request fails saying so, and can be tried again; `logout`
+does the same rather than delete a login a bridge is renewing, while `login`
+saves the new login anyway and says so. The lock may
 not work when `~/.config/mcp-bridge` is on a network file system. Bridges of
 version 0.3.0 and earlier take no lock: after upgrading, restart every MCP
 client that uses such a server.

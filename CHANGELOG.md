@@ -17,7 +17,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   died with them. Renewal now happens under a lock beside the token file
   (`tokens.json.lock`): the bridge that gets it reads the file again and
   either uses what another bridge stored or renews with the newest refresh
-  token. Reported, analysed and reproduced by a user, with a proof of concept.
+  token. `login` and `logout` write under the same lock. Reported, analysed
+  and reproduced by a user, with a proof of concept.
 - **Logging in again heals running bridges.** A bridge whose renewal failed
   kept the dead refresh token until its MCP client was restarted; it now reads
   the stored login again at its next attempt.

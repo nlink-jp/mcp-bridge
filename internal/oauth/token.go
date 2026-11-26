@@ -6,6 +6,7 @@ package oauth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -112,4 +113,33 @@ func DeleteTokens(path string) error {
 		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	return nil
+}
+
+// DeleteLogin removes a stored login under the lock the running bridges
+// share, so that a renewal in progress cannot write it back afterwards
+// (ADR-0007, decision 3). The lock file itself stays: another process may
+// hold it.
+//
+// Where no state directory exists there was never a login, and there is
+// nothing to lock. When the lock cannot be used, the file is deleted without
+// it and warning says why. When another process keeps it locked past the
+// limit, nothing is deleted.
+func DeleteLogin(path string) (warning string, err error) {
+	return deleteLogin(path, lockWait)
+}
+
+func deleteLogin(path string, wait time.Duration) (warning string, err error) {
+	if _, err := os.Stat(filepath.Dir(path)); os.IsNotExist(err) {
+		return "", nil
+	}
+	unlock, err := lockTokens(path, wait)
+	switch {
+	case err == nil:
+		defer unlock()
+	case errors.Is(err, errLockTimeout):
+		return "", fmt.Errorf("another mcp-bridge process is renewing this login, so nothing was deleted; try again (%w)", err)
+	default:
+		warning = fmt.Sprintf("the token file cannot be locked, so it is deleted without coordinating with running mcp-bridge processes (%v)", err)
+	}
+	return warning, DeleteTokens(path)
 }

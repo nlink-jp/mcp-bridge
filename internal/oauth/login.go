@@ -3,6 +3,7 @@ package oauth
 import (
 	"crypto/subtle"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -57,6 +58,10 @@ type LoginConfig struct {
 	Out         io.Writer                 // user-facing progress
 	OpenBrowser func(rawURL string) error // replaced in tests
 	Timeout     time.Duration
+
+	// lockWait shortens the wait for the shared token lock in tests; zero
+	// means the production limit.
+	lockWait time.Duration
 }
 
 // Login runs the authorization_code flow with PKCE and stores the result.
@@ -147,7 +152,7 @@ func Login(cfg LoginConfig) (*Tokens, error) {
 		return nil, err
 	}
 
-	if err := SaveTokens(cfg.TokensPath, tokens); err != nil {
+	if err := saveLogin(cfg, tokens); err != nil {
 		return nil, err
 	}
 
@@ -441,4 +446,29 @@ func openBrowser(rawURL string) error {
 		return fmt.Errorf("no known browser command for %s", runtime.GOOS)
 	}
 	return cmd.Start()
+}
+
+// saveLogin stores a new login under the lock the running bridges share, so
+// that a renewal of the old login in progress cannot overwrite it afterwards
+// (ADR-0007, decision 3). The lock is taken only now, not while the browser
+// is open, so running bridges are never held up by a login.
+//
+// A login the user has just completed in the browser is never thrown away
+// for want of the lock: without it, the tokens are saved anyway and the user,
+// who is watching, is told.
+func saveLogin(cfg LoginConfig, tokens *Tokens) error {
+	wait := cfg.lockWait
+	if wait == 0 {
+		wait = lockWait
+	}
+	unlock, err := lockTokens(cfg.TokensPath, wait)
+	switch {
+	case err == nil:
+		defer unlock()
+	case errors.Is(err, errLockTimeout):
+		fmt.Fprintf(cfg.Out, "Warning: another mcp-bridge process kept the token file for %s locked, so the login is saved without waiting for it (%v).\n", cfg.ServerName, err)
+	default:
+		fmt.Fprintf(cfg.Out, "Warning: the token file for %s cannot be locked, so the login is saved without coordinating with running mcp-bridge processes (%v).\n", cfg.ServerName, err)
+	}
+	return SaveTokens(cfg.TokensPath, tokens)
 }
