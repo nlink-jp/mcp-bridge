@@ -570,10 +570,16 @@ func renewChild() int {
 	if f, ferr := os.Create(ready); ferr == nil {
 		f.Close()
 	}
+	// A parent that gave up never creates the start file; do not linger.
 	start := os.Getenv("CHILD_START")
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if _, err := os.Stat(start); err == nil {
 			break
+		}
+		if time.Now().After(deadline) {
+			fmt.Println("error the start file never appeared")
+			return 0
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
@@ -615,6 +621,12 @@ func TestRealProcessesRenewOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		cmds = append(cmds, cmd)
+		t.Cleanup(func() {
+			if cmd.ProcessState == nil { // never waited for: the test failed early
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			}
+		})
 	}
 	// Every child has read the expired login before any of them renews.
 	deadline := time.Now().Add(30 * time.Second)
@@ -659,5 +671,37 @@ func TestASecondInvalidateKeepsTheRejection(t *testing.T) {
 	}
 	if got == "at-0" {
 		t.Error("the refused access token was adopted from the file")
+	}
+}
+
+// Once the file is found missing or unreadable, an unsaved renewal no longer
+// counts: whatever is put there afterwards is newer, even when it holds the
+// refresh token that renewal failed to replace.
+func TestUnreadableFileEndsTheUnsavedRenewal(t *testing.T) {
+	s := newShare(t, false)
+	dir := filepath.Dir(s.path)
+	readOnly(t, dir)
+	p := s.provider(nil)
+	s.clock.advance(2 * time.Hour)
+	if _, err := p.Token(); err != nil { // rt-0 -> rt-1, not saved
+		t.Fatal(err)
+	}
+
+	_ = os.Chmod(dir, 0o700)
+	if err := os.WriteFile(s.path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.clock.advance(2 * time.Hour)
+	if _, err := p.Token(); err == nil {
+		t.Fatal("a corrupt file was not reported")
+	}
+
+	if err := SaveTokens(s.path, &Tokens{AccessToken: "at-0", RefreshToken: "rt-0", ExpiresAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = p.Token()
+	reqs := s.rs.requests()
+	if last := reqs[len(reqs)-1]; last != "rt-0" {
+		t.Errorf("renewed with %q from memory, want the file's rt-0: %v", last, reqs)
 	}
 }
