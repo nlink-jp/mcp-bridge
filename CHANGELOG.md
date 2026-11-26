@@ -6,6 +6,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-26
+
+Several bridges for one server renew its login one at a time (ADR-0007). An
+MCP client starts a bridge per session or window, and against a server that
+issues single-use refresh tokens they used to lose the stored login. Restart
+every MCP client that uses an OAuth server after upgrading.
+
 ### Fixed
 
 - **Several bridges for one server no longer lose its login** (ADR-0007).
@@ -308,6 +315,7 @@ endpoint.
 - Out of scope by decision, not omission: governance gates, audit receipts,
   telemetry export, tool masking, and the client_credentials flow.
 
+[0.3.1]: https://github.com/nlink-jp/mcp-bridge/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nlink-jp/mcp-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nlink-jp/mcp-bridge/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/nlink-jp/mcp-bridge/compare/v0.1.0...v0.1.1
