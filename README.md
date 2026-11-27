@@ -286,7 +286,9 @@ endpoints are found the way the MCP specification lays out. The server's 401 cha
 protected-resource metadata (RFC 9728), or that metadata is at a well-known
 location on the server; the document names the authorization server, whose own
 metadata gives the endpoints. A server that predates this is found through the
-well-known metadata paths on its own host.
+well-known metadata paths on its own host. The challenge is asked for with the
+opening an ordinary MCP client sends, built by the shared module nlink-jp/mcp
+(`server/discover` with its protocol headers), once and without a credential.
 
 With `"oauth": {}` a client is then registered dynamically (RFC 7591). The
 registration is stored per server, so a fixed callback port reuses it instead
@@ -371,8 +373,10 @@ client that uses such a server.
   decoded JSON config file (0004), why a device's certificate is pinned
   rather than left unverified (0005), why a pre-registered client can take
   its endpoints and scopes from what the server publishes (0006), why
-  bridges for one server renew its token one at a time (0007), and why both
-  MCP protocol eras pass through unchanged (0008)
+  bridges for one server renew its token one at a time (0007), why both
+  MCP protocol eras pass through unchanged (0008), and why the discovery
+  probe sends the shared module's opening rather than its own `initialize`
+  (0009)
 - [RFP](docs/en/mcp-bridge-rfp.md) — the scope decision and what is
   deliberately out of it
 

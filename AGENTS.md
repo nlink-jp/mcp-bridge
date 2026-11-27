@@ -126,6 +126,13 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
   configured `url` (`resourceMatches`); the OAuth HTTP client refuses a
   redirect off `https` (`refuseDowngrade`). A new request in the login or the
   refresh goes through `defaultHTTPClient` or a client with the same rule.
+- **The discovery probe writes no MCP message** (ADR-0009). `probeChallenge`
+  runs `client.Open` over `probeConn` (`internal/oauth/probe.go`), which makes
+  one POST and returns `errProbeAnswered` whatever came of it. One error for
+  every outcome matters: `client.Open` reads a deadline error from `Send` as
+  "no answer" and falls back to `initialize`. Later `Send`s are refused;
+  `probeChallenge` closes the Conn, because `Open` returns no `Client` on error.
+  Do not put a hand-written body back.
 - **Text from a server reaches the terminal only through `cli.Printable`.**
   `login` and `inspect` wrap their writer with `printable`, and `main` filters
   the final error. A command that starts printing what a server said wraps its

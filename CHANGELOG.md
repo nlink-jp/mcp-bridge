@@ -6,6 +6,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **The OAuth discovery probe no longer writes its own `initialize`** (ADR-0009).
+  The unauthenticated request that asks the server for its 401 challenge is now
+  the opening nlink-jp/mcp builds — `server/discover` with
+  `MCP-Protocol-Version` and `Mcp-Method` — sent once, without a credential, as
+  before. Measured against GitHub's and Slack's MCP servers, the challenge is
+  the same byte for byte. A probe that cannot be built is reported as such, not
+  as an unreachable server.
+
 ## [0.4.2] - 2026-11-27
 
 ### Changed

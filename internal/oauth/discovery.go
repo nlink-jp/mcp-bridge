@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // maxMetadataBytes bounds every discovery document read.
@@ -88,6 +89,9 @@ type discoveryRequest struct {
 	cachePath string
 	client    *http.Client
 	out       io.Writer
+	// probeTimeout bounds the wait for the probe's answer; zero means
+	// defaultProbeTimeout. Tests shorten it.
+	probeTimeout time.Duration
 }
 
 // allowHTTP reports whether discovery may use http URLs: only when the
@@ -232,6 +236,9 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 
 	probe, err := probeChallenge(req)
 	if err != nil {
+		if notSent := (*probeNotSentError)(nil); errors.As(err, &notSent) {
+			return nil, err
+		}
 		if !probe.reached {
 			// No answer at all. Every other location is on the same host, so
 			// asking them would only repeat this failure four more times under
@@ -297,52 +304,6 @@ func findAuthServer(req discoveryRequest) (*located, error) {
 			remedy, strings.Join(attempts, "\n  - "))
 	}
 	return &located{meta: meta, issuer: origin, challengeScopes: probe.scopes, resourceScopes: resourceScopes}, nil
-}
-
-// probed is what the server's answer to an unauthenticated request said.
-type probed struct {
-	reached     bool // the server answered, whatever it said
-	metadataURL string
-	scopes      []string
-}
-
-// probeChallenge makes an unauthenticated request and reads the 401 challenge:
-// where the server's metadata is, and which scopes it asks for.
-//
-// An error from a server that answered is one more attempt to report, not the
-// end of discovery: a server that answers without a challenge, or with one
-// that names nothing, may still publish its metadata at a well-known location.
-func probeChallenge(req discoveryRequest) (probed, error) {
-	body := strings.NewReader(`{"jsonrpc":"2.0","id":"discovery","method":"initialize","params":{}}`)
-	httpReq, err := http.NewRequest(http.MethodPost, req.serverURL, body)
-	if err != nil {
-		return probed{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-
-	resp, err := req.client.Do(httpReq)
-	if err != nil {
-		// A redirect this client refused is still an answer from the server.
-		var refused *redirectError
-		return probed{reached: errors.As(err, &refused)}, err
-	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxMetadataBytes))
-	resp.Body.Close()
-
-	if resp.StatusCode != http.StatusUnauthorized {
-		return probed{reached: true}, fmt.Errorf("expected an HTTP 401 challenge, got %d — the server may not require authorization", resp.StatusCode)
-	}
-	challenges := resp.Header.Values("WWW-Authenticate")
-	out := probed{
-		reached:     true,
-		metadataURL: bearerParam(challenges, "resource_metadata"),
-		scopes:      strings.Fields(bearerParam(challenges, "scope")),
-	}
-	if out.metadataURL == "" {
-		return out, fmt.Errorf("the challenge names no resource_metadata: %s", orDash(strings.Join(challenges, ", ")))
-	}
-	return out, nil
 }
 
 // resourceMetadata is OAuth 2.0 Protected Resource Metadata (RFC 9728), as far
