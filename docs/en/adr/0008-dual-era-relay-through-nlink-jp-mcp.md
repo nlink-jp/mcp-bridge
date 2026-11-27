@@ -160,7 +160,7 @@ of this record). Whether a modern-only upstream checks the body before authentic
 
 ### 11. What the pre-release check changed (2026-11-27)
 
-Four points the independent pre-release pass found the design did not define were decided by the operator. Where
+The points the independent pre-release pass found the design did not define were decided by the operator (items 5–7 were added after the pass over the fixes). Where
 §3–§8 touch them, this section prevails.
 
 1. **A request that would stay unanswered gets `-32603`** (added to §3 and §5). When an SSE stream a request opened
@@ -176,6 +176,16 @@ Four points the independent pre-release pass found the design did not define wer
    negotiated `MCP-Protocol-Version` too (since 2025-06-18 an HTTP client puts the header on every later request).
 4. **The refresh's deadline** (added to §6). One refresh (up to 10 pages) as a whole is cut off at 60 seconds, and
    past that it is a failed refresh (a per-page deadline let other requests wait up to 10 minutes).
+5. **A 2xx answer's `id` is corrected to the request's too** (added to §3 and §5). When a request's 2xx
+   `application/json` body is a single response (with `result` or `error` and no `method`) whose `id` is absent,
+   `null` or different, it is delivered under the request's `id` (the rule non-2xx answers follow; otherwise the
+   request stays unanswered).
+6. **A line that is JSON but not a JSON-RPC message gets `-32600`** (added to §7). Malformed JSON keeps `-32700`;
+   a JSON value that is not a valid message (not an object, a `method` that is not a string, …) is answered with
+   `-32600` (`id: null`).
+7. **The DELETE carries the version header only when a header can carry it** (completes item 3). When the
+   negotiated version holds characters a header cannot carry, the DELETE goes without the header (with it, the
+   HTTP client refuses to send, and the session is never ended).
 
 ## Detailed design
 
