@@ -281,3 +281,44 @@ func TestDiagnosticsNeverReachStdout(t *testing.T) {
 		t.Error("nothing was logged despite three failures")
 	}
 }
+
+// One message over the limit must not end the relay (ADR-0008 §7): it is
+// skipped, answered with a null-id parse error, and the next message still
+// reaches the upstream.
+func TestOverlongClientLineIsAnsweredAndTheRelayGoesOn(t *testing.T) {
+	up := newFake()
+	huge := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"x":"` +
+		strings.Repeat("a", maxLineBytes) + `"}}`
+	input := huge + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
+	out, logs := run(t, up, input, nil)
+
+	if !strings.Contains(out, "-32700") || !strings.Contains(out, `"id":null`) {
+		t.Errorf("the over-long line was not answered with a null-id parse error: %q", out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("longer than %d bytes", maxLineBytes)) {
+		t.Errorf("the answer does not name the limit: %q", out)
+	}
+	sent := up.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0], `"id":2`) {
+		t.Fatalf("the message after the over-long one did not reach the upstream: %v", sent)
+	}
+	if !strings.Contains(logs, "longer than") {
+		t.Errorf("the skip was not logged: %q", logs)
+	}
+}
+
+// A message exactly at the limit is a message, not an over-long one.
+func TestClientLineAtTheLimitIsForwarded(t *testing.T) {
+	up := newFake()
+	prefix := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"x":"`
+	suffix := `"}}`
+	msg := prefix + strings.Repeat("a", maxLineBytes-len(prefix)-len(suffix)) + suffix
+	out, _ := run(t, up, msg+"\n", nil)
+
+	if strings.Contains(out, "-32700") {
+		t.Errorf("a message at the limit was refused: %q", out[:min(len(out), 200)])
+	}
+	if sent := up.sentMessages(); len(sent) != 1 || len(sent[0]) != maxLineBytes {
+		t.Fatalf("the message at the limit was not forwarded whole: %d messages", len(sent))
+	}
+}

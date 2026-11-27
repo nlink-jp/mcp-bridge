@@ -1,18 +1,21 @@
 // Package bridge relays JSON-RPC messages between a stdio MCP client and an
 // upstream transport.
 //
-// The relay is transparent: no message is inspected for its MCP meaning,
-// rewritten, filtered, or answered locally. The only messages mcp-bridge
-// originates are error responses for requests it could not forward.
+// The relay passes the era the client opens through unchanged (ADR-0008 §2):
+// it answers neither initialize nor server/discover, and message bodies keep
+// their content. What the specification requires of an HTTP client — headers
+// derived from the body, excluding tools with invalid x-mcp-header marks —
+// happens in the transport. The messages mcp-bridge originates here are error
+// responses for requests it could not forward or could not read.
 package bridge
 
 import (
-	"bufio"
 	"bytes"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"sync"
+
+	"github.com/nlink-jp/mcp/wire"
 
 	"github.com/nlink-jp/mcp-bridge/internal/jsonrpc"
 	"github.com/nlink-jp/mcp-bridge/internal/transport"
@@ -26,21 +29,20 @@ const maxLineBytes = 8 << 20 // 8 MiB
 type Bridge struct {
 	upstream transport.Transport
 	in       io.Reader
-	out      io.Writer
 	logs     io.Writer
 
-	// outMu serialises stdout writes. Two goroutines write there — the
-	// upstream reader and the error path of the client reader — and an
-	// interleaved write would corrupt the newline framing that the client
-	// parses.
-	outMu sync.Mutex
+	// out serialises stdout writes and writes each message as one line. Two
+	// goroutines write there — the upstream reader and the error path of the
+	// client reader — and an interleaved write would corrupt the newline
+	// framing that the client parses.
+	out *wire.Writer
 }
 
 // New creates a bridge. out receives JSON-RPC and nothing else; logs receives
 // everything else. In production out is stdout and logs is stderr, and mixing
 // them breaks every MCP client that connects.
 func New(upstream transport.Transport, in io.Reader, out, logs io.Writer) *Bridge {
-	return &Bridge{upstream: upstream, in: in, out: out, logs: logs}
+	return &Bridge{upstream: upstream, in: in, out: wire.NewWriter(out), logs: logs}
 }
 
 // Run relays until the client closes its input, then shuts the upstream down.
@@ -64,16 +66,27 @@ func (b *Bridge) Run() error {
 // pumpClient reads newline-delimited messages from the client and forwards
 // them upstream.
 func (b *Bridge) pumpClient() error {
-	scanner := bufio.NewScanner(b.in)
-	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
+	reader := wire.NewReader(b.in, maxLineBytes)
 
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
+	for {
+		line, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if errors.Is(err, wire.ErrLineTooLong) {
+			// The rest of the line was skipped, so its id is unknown. Answer
+			// with a null id and keep reading: one oversized message must not
+			// end the relay (ADR-0008 §7).
+			b.logf("skipping a client message longer than %d bytes", maxLineBytes)
+			b.write(jsonrpc.NewErrorResponse(nil, jsonrpc.CodeParseError,
+				fmt.Sprintf("message longer than %d bytes", maxLineBytes)))
 			continue
 		}
-		// scanner reuses its buffer, and the message outlives this iteration
-		// once it reaches the transport.
+		if err != nil {
+			return fmt.Errorf("read from client: %w", err)
+		}
+		// The reader reuses its buffer, and the message outlives this
+		// iteration once it reaches the transport.
 		msg := append([]byte(nil), line...)
 
 		// A batch cannot be answered per-member without parsing it, and
@@ -107,11 +120,6 @@ func (b *Bridge) pumpClient() error {
 			}
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read from client: %w", err)
-	}
-	return nil
 }
 
 // pumpUpstream forwards server messages to the client.
@@ -130,24 +138,16 @@ func (b *Bridge) pumpUpstream() {
 
 // write emits one message as a single line.
 //
-// The payload is compacted first: stdio framing is newline-delimited, so a
-// server that pretty-prints its JSON would otherwise split one message across
-// several lines and desynchronise the client for the rest of the session.
+// wire.Writer compacts the payload first: stdio framing is newline-delimited,
+// so a server that pretty-prints its JSON would otherwise split one message
+// across several lines and desynchronise the client for the rest of the
+// session. A payload that is not JSON is refused rather than written, because
+// writing it would corrupt the stream for every later message. The transport
+// answers a request whose 2xx body is not JSON itself (ADR-0008 §3), so what
+// is dropped here is an unsolicited message.
 func (b *Bridge) write(msg []byte) {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, msg); err != nil {
-		// Writing this would corrupt the stream for every later message, so
-		// dropping it is the lesser harm. It is logged in full because a
-		// server emitting non-JSON is a bug worth seeing.
+	if err := b.out.Write(msg); err != nil {
 		b.logf("dropping a malformed upstream message (%v): %s", err, truncate(msg, 400))
-		return
-	}
-	buf.WriteByte('\n')
-
-	b.outMu.Lock()
-	defer b.outMu.Unlock()
-	if _, err := b.out.Write(buf.Bytes()); err != nil {
-		b.logf("write to the client failed: %v", err)
 	}
 }
 
