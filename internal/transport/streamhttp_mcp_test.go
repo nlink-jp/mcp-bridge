@@ -622,3 +622,51 @@ func TestTheDeleteGoesWithoutAnUnsafeVersion(t *testing.T) {
 		t.Fatal("no DELETE: the session was not ended")
 	}
 }
+
+// A stream that answered its request under a re-spelled id ("a\u003cb\u0026c" for
+// "a<b&c") has answered it: no synthesized answer follows.
+func TestAStreamAnsweringUnderAReSpelledIDGetsNoExtraAnswer(t *testing.T) {
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, _ string) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"a\\u003cb\\u0026c\",\"result\":{\"tools\":[]}}\n\n")
+	})
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":"a<b&c","method":"tools/list"}`))
+	if got := receiveWithin(t, tr, 2*time.Second); !strings.Contains(got, `"result"`) {
+		t.Fatalf("answer %q", got)
+	}
+	ch := make(chan []byte, 1)
+	go func() {
+		if m, ok := tr.Receive(); ok {
+			ch <- m
+		}
+	}()
+	select {
+	case m := <-ch:
+		t.Errorf("a second answer reached the client: %s", m)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// A synthesized answer and an id correction keep the id's spelling: an
+// HTML-escaping encoder would turn "a<b" into "a\u003cb".
+func TestSynthesizedAnswersKeepTheIDsSpelling(t *testing.T) {
+	for name, answer := range map[string]func(w http.ResponseWriter){
+		"synthesized": func(w http.ResponseWriter) { w.WriteHeader(http.StatusOK) },
+		"corrected":   func(w http.ResponseWriter) { jsonAnswer(w, `{"jsonrpc":"2.0","id":null,"result":{"x":"<&>"}}`) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var rec recorder
+			srv := rec.server(t, func(w http.ResponseWriter, _ string) { answer(w) })
+			tr, _ := NewHTTP(srv.URL)
+			defer tr.Close()
+			_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":"a<b","method":"tools/list"}`))
+			got := receiveWithin(t, tr, time.Second)
+			if !strings.Contains(got, `"id":"a<b"`) || strings.Contains(got, `\u003c`) {
+				t.Errorf("answer %s", got)
+			}
+		})
+	}
+}

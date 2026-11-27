@@ -362,3 +362,18 @@ func TestJSONThatIsNotAMessageGetsInvalidRequest(t *testing.T) {
 		}
 	}
 }
+
+// JSON that decodes to no message at all is an invalid request and is not
+// forwarded (ADR-0008 §11.6).
+func TestAnEmptyMessageGetsInvalidRequest(t *testing.T) {
+	for _, line := range []string{`null`, `{}`} {
+		up := newFake()
+		out, _ := run(t, up, line+"\n", nil)
+		if !strings.Contains(out, "-32600") {
+			t.Errorf("%s was answered %q", line, out)
+		}
+		if len(up.sentMessages()) != 0 {
+			t.Errorf("%s reached the upstream", line)
+		}
+	}
+}
