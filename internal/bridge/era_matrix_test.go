@@ -68,6 +68,7 @@ func (p *httpProbe) serve(w http.ResponseWriter, r *http.Request) {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
 		Params struct {
+			Name string                     `json:"name"`
 			Meta map[string]json.RawMessage `json:"_meta"`
 		} `json:"params"`
 	}
@@ -86,6 +87,10 @@ func (p *httpProbe) serve(w http.ResponseWriter, r *http.Request) {
 	case version != "":
 		if r.Header.Get("MCP-Protocol-Version") != version || r.Header.Get("Mcp-Method") != msg.Method {
 			reject(-32020, "headers and body disagree")
+			return
+		}
+		if msg.Method == "tools/call" && r.Header.Get("Mcp-Name") != msg.Params.Name {
+			reject(-32020, "Mcp-Name and params.name disagree")
 			return
 		}
 	case msg.Method != "initialize" && p.legacy != "":

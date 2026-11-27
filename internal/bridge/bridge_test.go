@@ -287,8 +287,13 @@ func TestDiagnosticsNeverReachStdout(t *testing.T) {
 // reaches the upstream.
 func TestOverlongClientLineIsAnsweredAndTheRelayGoesOn(t *testing.T) {
 	up := newFake()
-	huge := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"x":"` +
-		strings.Repeat("a", maxLineBytes) + `"}}`
+	// Exactly one byte over the limit.
+	prefix := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"x":"`
+	suffix := `"}}`
+	huge := prefix + strings.Repeat("a", maxLineBytes+1-len(prefix)-len(suffix)) + suffix
+	if len(huge) != maxLineBytes+1 {
+		t.Fatalf("test setup: %d bytes", len(huge))
+	}
 	input := huge + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
 	out, logs := run(t, up, input, nil)
 
@@ -313,13 +318,14 @@ func TestClientLineAtTheLimitIsForwarded(t *testing.T) {
 	prefix := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"x":"`
 	suffix := `"}}`
 	msg := prefix + strings.Repeat("a", maxLineBytes-len(prefix)-len(suffix)) + suffix
-	out, _ := run(t, up, msg+"\n", nil)
+	out, _ := run(t, up, msg+"\n"+`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`+"\n", nil)
 
 	if strings.Contains(out, "-32700") {
 		t.Errorf("a message at the limit was refused: %q", out[:min(len(out), 200)])
 	}
-	if sent := up.sentMessages(); len(sent) != 1 || len(sent[0]) != maxLineBytes {
-		t.Fatalf("the message at the limit was not forwarded whole: %d messages", len(sent))
+	sent := up.sentMessages()
+	if len(sent) != 2 || len(sent[0]) != maxLineBytes || !strings.Contains(sent[1], `"id":2`) {
+		t.Fatalf("the message at the limit, then the next one, were not forwarded whole: %d messages", len(sent))
 	}
 }
 
