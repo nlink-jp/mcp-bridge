@@ -99,10 +99,41 @@ func NewErrorResponse(id json.RawMessage, code int, message string) []byte {
 		Error:   &Error{Code: code, Message: message},
 	}
 	// Marshalling a struct of plain fields cannot fail; a raw id that is not
-	// valid JSON is the only risk, and it came from a decoded message.
-	encoded, err := json.Marshal(resp)
+	// valid JSON is the only risk, and it came from a decoded message. No HTML
+	// escaping: the id keeps the spelling the client sent.
+	encoded, err := MarshalPlain(resp)
 	if err != nil {
 		return []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"internal error"}}`)
 	}
 	return encoded
+}
+
+// MarshalPlain encodes v as json.Marshal does but without HTML escaping, so
+// an id or a value holding < > & keeps its spelling.
+func MarshalPlain(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
+
+// CanonicalID spells a JSON-RPC id one way: decoded, then encoded again
+// without HTML escaping, numbers kept as written. Two spellings of one id —
+// "a<b" and its escaped form — get one key, so an answer whose id an encoder
+// re-spelled is still recognised as the answer to its request.
+func CanonicalID(raw json.RawMessage) string {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if dec.Decode(&v) != nil {
+		return string(raw)
+	}
+	b, err := MarshalPlain(v)
+	if err != nil {
+		return string(raw)
+	}
+	return string(b)
 }

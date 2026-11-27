@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/nlink-jp/mcp/httpwire"
+
+	"github.com/nlink-jp/mcp-bridge/internal/jsonrpc"
 )
 
 // A HeaderMismatch (-32020) on a modern tools/call means the upstream's
@@ -93,7 +95,7 @@ func (t *httpTransport) refreshMarks(original []byte) error {
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params})
+		body, err := jsonrpc.MarshalPlain(map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params})
 		if err != nil {
 			return err
 		}

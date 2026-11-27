@@ -593,13 +593,10 @@ func answers(msg, id json.RawMessage) bool {
 	return sameID(m.ID, id)
 }
 
-// sameID compares two JSON-RPC ids by their compacted text.
+// sameID compares two JSON-RPC ids by value (jsonrpc.CanonicalID), so a
+// re-spelled id still matches.
 func sameID(a, b json.RawMessage) bool {
-	var x, y bytes.Buffer
-	if json.Compact(&x, a) != nil || json.Compact(&y, b) != nil {
-		return false
-	}
-	return x.String() == y.String()
+	return jsonrpc.CanonicalID(a) == jsonrpc.CanonicalID(b)
 }
 
 // mediaType returns the lower-cased type of a Content-Type, without its
@@ -669,7 +666,7 @@ func underID(body []byte, id json.RawMessage) []byte {
 		return body
 	}
 	msg["id"] = id
-	out, err := json.Marshal(msg)
+	out, err := jsonrpc.MarshalPlain(msg)
 	if err != nil {
 		return body
 	}

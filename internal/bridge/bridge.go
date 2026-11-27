@@ -101,6 +101,11 @@ func (b *Bridge) pumpClient() error {
 		}
 
 		parsed, err := jsonrpc.Parse(msg)
+		if err == nil && parsed.Method == "" && len(parsed.ID) == 0 && parsed.Result == nil && parsed.Error == nil {
+			// JSON that decodes to no message at all — a bare null, an empty
+			// object (ADR-0008 §11.6).
+			err = errors.New("not a JSON-RPC message")
+		}
 		if err != nil {
 			// Nothing to address a response to: the id is inside the message
 			// that would not parse.
