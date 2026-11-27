@@ -44,7 +44,11 @@ type credential struct {
 func buildTransportOptions(srv *config.Server, name string, logs io.Writer, allowMissingLogin bool) ([]transport.Option, credential, error) {
 	opts, cred, err := authOptions(srv, name, logs, allowMissingLogin)
 	opts = append(opts, connectionOptions(srv)...)
-	return append(opts, transport.WithLogs(logs)), cred, err
+	// The transport's log quotes upstream text (a body that is not JSON, a
+	// removed tool's name). Every caller gets it through printable(), so no
+	// command can forget to filter it — inspect's Logs is not filtered
+	// elsewhere, and a second filter on Run's is harmless.
+	return append(opts, transport.WithLogs(printable(logs))), cred, err
 }
 
 // connectionOptions holds what every connection to the server needs whether or

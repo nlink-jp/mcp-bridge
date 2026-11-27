@@ -119,3 +119,23 @@ func TestSessionLogCarriesNoControlCharactersFromTheServer(t *testing.T) {
 		t.Errorf("a control character reached the log: %q", logs.String())
 	}
 }
+
+// inspect's diagnostics come from the same transport and quote the same
+// upstream text: they are filtered too.
+func TestInspectLogCarriesNoControlCharactersFromTheServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, "not json \x1b[2J\x1b]0;owned\x07")
+	}))
+	defer srv.Close()
+	cfg := writeConfig(t, fmt.Sprintf(`{"servers":{"s":{"url":%q}}}`, srv.URL))
+
+	var out, logs bytes.Buffer
+	_ = Inspect(InspectOptions{ConfigPath: cfg, Server: "s", Out: &out, Logs: &logs})
+	if !strings.Contains(logs.String(), "not json") {
+		t.Fatalf("the server's text never reached inspect's log, so nothing was tested:\n%s", logs.String())
+	}
+	if strings.ContainsAny(logs.String(), "\x1b\x07") {
+		t.Errorf("a control character reached inspect's log: %q", logs.String())
+	}
+}
