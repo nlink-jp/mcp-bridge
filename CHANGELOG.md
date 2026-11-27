@@ -15,8 +15,9 @@ by nlink-jp's servers and relays, which itself uses only the standard library.
 
 ### Added
 
-- **The MCP protocol headers on every POST.** A handshake session's requests
-  carry the negotiated `MCP-Protocol-Version` — required since 2025-06-18 and
+- **The MCP protocol headers.** A handshake session's messages after
+  `initialize`, and the DELETE that ends the session, carry the negotiated
+  `MCP-Protocol-Version` — required since 2025-06-18 and
   missing until now; servers accepted the requests only because they may treat
   a missing header as 2025-03-26. A 2026-07-28 request carries its version,
   `Mcp-Method`, `Mcp-Name`, and the `Mcp-Param-*` headers a tool's schema asks
@@ -54,6 +55,11 @@ by nlink-jp's servers and relays, which itself uses only the standard library.
   event whose data is not JSON is dropped), are answered with `-32603`.
 - **An SSE event whose data lines together exceed 8 MiB is answered with
   `-32603`**; the joined size used to be unbounded.
+- **A 2xx answer that does not name its request is delivered under the
+  request's id** (an `id: null` error, a response without an id), as non-2xx
+  answers already were; such a request used to wait for ever.
+- **A client line that is JSON but not a JSON-RPC message gets `-32600`**
+  (Invalid Request); malformed JSON keeps `-32700`.
 - **A request whose headers cannot be built is answered with `-32602` and not
   sent**: an argument a header cannot carry, a `tools/call` or `prompts/get`
   without a name, a `resources/read` without a URI. A batch is sent without
