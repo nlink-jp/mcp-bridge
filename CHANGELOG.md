@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-27
+
 mcp-bridge speaks both MCP eras (ADR-0008). MCP 2026-07-28 replaced the
 `initialize` handshake with a version carried on every request; the bridge
 passes the era your client opens through unchanged and adds what the
