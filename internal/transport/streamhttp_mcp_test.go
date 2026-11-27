@@ -365,3 +365,24 @@ func TestCloseCarriesTheNegotiatedVersion(t *testing.T) {
 		t.Fatal("no DELETE")
 	}
 }
+
+// A legacy upstream refusing the era probe is the normal fallback, and the
+// log says so instead of reporting a failure.
+func TestALegacyAnswerToTheEraProbeIsLoggedAsTheFallback(t *testing.T) {
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, _ string) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, "JSON RPC not handled")
+	})
+	var logs syncBuffer
+	tr, _ := NewHTTP(srv.URL, WithLogs(&logs))
+	defer tr.Close()
+
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{` + modernMeta + `}}`))
+	if got := receiveWithin(t, tr, time.Second); !strings.Contains(got, "-32603") {
+		t.Errorf("answer %s", got)
+	}
+	if !strings.Contains(logs.String(), "a legacy server") || strings.Contains(logs.String(), "answering the request") {
+		t.Errorf("log %q", logs.String())
+	}
+}

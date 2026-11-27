@@ -327,7 +327,13 @@ func (t *httpTransport) route(resp *http.Response, out *outgoing) error {
 		}
 		return nil
 	case httpwire.Synthesized:
-		t.logf("upstream answered HTTP %d without a JSON-RPC message; answering the request with -32603", status)
+		if out.method == "server/discover" {
+			// The usual answer of a legacy server to the era probe: the
+			// client falls back to initialize. Not a failure.
+			t.logf("upstream did not answer server/discover (HTTP %d): a legacy server; the client falls back to initialize", status)
+		} else {
+			t.logf("upstream answered HTTP %d without a JSON-RPC message; answering the request with -32603", status)
+		}
 		return t.deliverMessage(outcome.Body)
 	}
 
