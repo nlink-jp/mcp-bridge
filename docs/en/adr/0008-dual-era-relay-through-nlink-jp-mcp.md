@@ -152,6 +152,9 @@ malformed JSON is as today (`-32700`, `id: null`).
 
 ### 10. The OAuth discovery POST stays
 
+*(Superseded by ADR-0009 on 2026-11-27: the probe sends the opening nlink-jp/mcp builds, and no exemption is
+asked of ADR-030 §6.)*
+
 The `initialize` POST in `internal/oauth/discovery.go` is an authentication probe for a 401 and its
 `WWW-Authenticate`; it never reaches MCP processing. Its body stays. So that ADR-030 §6's check does not read it
 as a hand-written handshake, `.github` is told through an issue when that check is written (ADR-025; not a step

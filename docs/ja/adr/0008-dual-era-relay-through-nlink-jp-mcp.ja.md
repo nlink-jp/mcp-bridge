@@ -146,6 +146,8 @@ mcp-bridge は stdio のクライアントと Streamable HTTP の上流をつな
 
 ### 10. OAuth の探索の POST は残す
 
+*（2026-11-27 に ADR-0009 が置き換えた。打診は nlink-jp/mcp が組む開始の要求を送り、ADR-030 §6 に除外を求めない。）*
+
 `internal/oauth/discovery.go` の `initialize` の POST は、401 と `WWW-Authenticate` を得るための認証の探りで、
 MCP の処理には届かない。本文はそのままにする。ADR-030 §6 の検査がこれを握手の自前実装と読まないよう、
 検査を書くときに `.github` へ issue で伝える（ADR-025。この記録の段ではない）。新方式専用の上流が、認証の
