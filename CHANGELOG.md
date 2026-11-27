@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stream that answered its request under a re-spelled id no longer gets a
+  second answer.** Ids were compared by their bytes, so an upstream that spelled
+  the id another way (an escaped `<` or `&`, say) was read as not answering, and
+  the client got the real answer and a synthesized `-32603`. Ids are now
+  compared by value.
+- **Answers mcp-bridge writes keep the id's spelling.** A synthesized error and
+  an id correction went through an HTML-escaping encoder; they no longer do.
+- **A bare `null` or an empty object from the client is answered with
+  `-32600`** instead of being forwarded as a message.
+
 ## [0.4.0] - 2026-11-27
 
 mcp-bridge speaks both MCP eras (ADR-0008). MCP 2026-07-28 replaced the

@@ -146,6 +146,10 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
 - **Every answer passes through the Tracker before delivery** — a JSON body and
   each SSE message — or the negotiated version and the tools' marks are not
   learned and the next request goes out without its headers.
+- **Ids are compared by value, and written without HTML escaping**
+  (`jsonrpc.CanonicalID`, `jsonrpc.MarshalPlain`). `json.Marshal` escapes
+  `<` `>` `&`, so an id compared by its bytes, or re-encoded with it, stops
+  matching its request.
 - **The HeaderMismatch retry is the only request mcp-bridge originates**
   (`internal/transport/mismatch.go`): once per request, refreshes serialized,
   up to 10 pages, answers kept from the client. Do not add another.
