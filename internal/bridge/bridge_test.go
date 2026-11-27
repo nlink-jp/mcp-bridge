@@ -322,3 +322,25 @@ func TestClientLineAtTheLimitIsForwarded(t *testing.T) {
 		t.Fatalf("the message at the limit was not forwarded whole: %d messages", len(sent))
 	}
 }
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("broken pipe") }
+
+// A failed write to the client is an I/O error: the message — which may be a
+// tool result — is not quoted into the log. Only non-JSON is quoted.
+func TestWriteFailureDoesNotQuoteTheMessage(t *testing.T) {
+	up := newFake()
+	up.incoming <- []byte(`{"jsonrpc":"2.0","id":2,"result":{"secret":"do-not-log"}}`)
+	var logs syncWriter
+	b := New(up, strings.NewReader(""), failingWriter{}, &logs)
+	if err := b.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(logs.String(), "do-not-log") {
+		t.Errorf("a failed write quoted the message: %q", logs.String())
+	}
+	if !strings.Contains(logs.String(), "write to the client failed") {
+		t.Errorf("the failure was not logged: %q", logs.String())
+	}
+}

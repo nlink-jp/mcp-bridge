@@ -11,6 +11,7 @@ package bridge
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -146,9 +147,19 @@ func (b *Bridge) pumpUpstream() {
 // answers a request whose 2xx body is not JSON itself (ADR-0008 §3), so what
 // is dropped here is an unsolicited message.
 func (b *Bridge) write(msg []byte) {
-	if err := b.out.Write(msg); err != nil {
-		b.logf("dropping a malformed upstream message (%v): %s", err, truncate(msg, 400))
+	err := b.out.Write(msg)
+	if err == nil {
+		return
 	}
+	// Only a payload that is not JSON is quoted: a server emitting non-JSON is
+	// a bug worth seeing. A failed write to the client is an I/O error, and
+	// the message — a tool result, say — has no business in the log.
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		b.logf("dropping a malformed upstream message (%v): %s", err, truncate(msg, 400))
+		return
+	}
+	b.logf("write to the client failed: %v", err)
 }
 
 // logf writes a diagnostic. Everything that is not JSON-RPC goes here.
