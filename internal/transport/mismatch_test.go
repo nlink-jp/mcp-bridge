@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -235,4 +236,102 @@ func TestRefreshReadsAnSSEAnswer(t *testing.T) {
 		t.Errorf("answer %s", got)
 	}
 	noMore(t, tr) // the refresh stream's notification is not the client's
+}
+
+// Refreshes are serialized: two mismatches at once never put two tools/list
+// refreshes in flight together.
+func TestRefreshesAreSerialized(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		inFlight int
+		overlap  bool
+	)
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, body string) {
+		id := idOf(body)
+		if strings.Contains(body, `"tools/list"`) {
+			mu.Lock()
+			inFlight++
+			if inFlight > 1 {
+				overlap = true
+			}
+			mu.Unlock()
+			time.Sleep(50 * time.Millisecond)
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			jsonAnswer(w, fmt.Sprintf(toolsWithOwnerMark, id))
+			return
+		}
+		alwaysReject(w, id, false)
+	})
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) { defer wg.Done(); _ = tr.Send(modernCall(50 + i)) }(i)
+	}
+	wg.Wait()
+	receiveWithin(t, tr, 2*time.Second)
+	receiveWithin(t, tr, 2*time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	if overlap {
+		t.Error("two refreshes ran at once")
+	}
+}
+
+// A refresh that fails after the first page keeps that page's marks: the
+// next call to a tool listed there carries its headers (ADR-0008 §6.3).
+func TestAFailureAfterTheFirstPageKeepsItsMarks(t *testing.T) {
+	var rec recorder
+	lists := func(cursor string) string {
+		if cursor == "" {
+			return `{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"get_repo","inputSchema":{"type":"object","properties":{"owner":{"type":"string","x-mcp-header":"Owner"}}}}],"nextCursor":"p2"}}`
+		}
+		return `{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"page 2 is down"}}`
+	}
+	url := strictUpstream(t, &rec, lists, rejectWithoutParam)
+	tr, _ := NewHTTP(url)
+	defer tr.Close()
+
+	_ = tr.Send(modernCall(60))
+	if got := receiveWithin(t, tr, 2*time.Second); !strings.Contains(got, "-32020") {
+		t.Fatalf("answer %s", got)
+	}
+	_ = tr.Send(modernCall(61))
+	if got := receiveWithin(t, tr, 2*time.Second); !strings.Contains(got, `"ok"`) {
+		t.Errorf("the first page's marks were not kept: %s", got)
+	}
+}
+
+// A refresh as a whole is bounded (ADR-0008 §11.4).
+func TestARefreshPastItsDeadlineFails(t *testing.T) {
+	old := refreshTimeout
+	refreshTimeout = 200 * time.Millisecond
+	defer func() { refreshTimeout = old }()
+
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, body string) {
+		id := idOf(body)
+		if strings.Contains(body, `"tools/list"`) {
+			time.Sleep(time.Second)
+			jsonAnswer(w, fmt.Sprintf(toolsWithOwnerMark, id))
+			return
+		}
+		rejectWithoutParam(w, id, false)
+	})
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+
+	start := time.Now()
+	_ = tr.Send(modernCall(62))
+	if got := receiveWithin(t, tr, 2*time.Second); !strings.Contains(got, "-32020") {
+		t.Errorf("answer %s", got)
+	}
+	if d := time.Since(start); d > 900*time.Millisecond {
+		t.Errorf("the refresh ran %v past a 200 ms deadline", d)
+	}
 }

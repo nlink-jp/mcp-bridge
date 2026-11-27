@@ -386,3 +386,137 @@ func TestALegacyAnswerToTheEraProbeIsLoggedAsTheFallback(t *testing.T) {
 		t.Errorf("log %q", logs.String())
 	}
 }
+
+// ADR-0008 §11.1: a request that would stay unanswered gets -32603.
+func TestRequestsThatWouldStayUnansweredAreAnswered(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer func(w http.ResponseWriter)
+	}{
+		{"empty 2xx", func(w http.ResponseWriter) { w.WriteHeader(http.StatusOK) }},
+		{"202", func(w http.ResponseWriter) { w.WriteHeader(http.StatusAccepted) }},
+		{"stream without the answer", func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n")
+		}},
+		{"stream whose event is not JSON", func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: message\ndata: <html>oops</html>\n\n")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var rec recorder
+			srv := rec.server(t, func(w http.ResponseWriter, _ string) { c.answer(w) })
+			var logs syncBuffer
+			tr, _ := NewHTTP(srv.URL, WithLogs(&logs))
+			defer tr.Close()
+			if err := tr.Send([]byte(`{"jsonrpc":"2.0","id":31,"method":"tools/list"}`)); err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for i := 0; i < 2; i++ { // a progress notification may come first
+				got = receiveWithin(t, tr, 2*time.Second)
+				if strings.Contains(got, `"id":31`) {
+					break
+				}
+			}
+			if !strings.Contains(got, `"id":31`) || !strings.Contains(got, "-32603") {
+				t.Errorf("answer %q", got)
+			}
+			if strings.Contains(got, "oops") {
+				t.Errorf("a non-JSON event reached the client: %q", got)
+			}
+		})
+	}
+}
+
+// A notification still gets nothing for a 202.
+func TestA202ToANotificationIsNotAnswered(t *testing.T) {
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, _ string) { w.WriteHeader(http.StatusAccepted) })
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	ch := make(chan []byte, 1)
+	go func() {
+		if m, ok := tr.Receive(); ok {
+			ch <- m
+		}
+	}()
+	select {
+	case m := <-ch:
+		t.Errorf("a notification was answered: %s", m)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// One event's joined data may be exactly the limit (ADR-0008 §5).
+func TestAnEventOfExactlyTheLimitIsDelivered(t *testing.T) {
+	head := `{"jsonrpc":"2.0","id":32,`
+	tail := `"result":{"x":"` + `"}}`
+	pad := strings.Repeat("a", maxMessageBytes-len(head)-1-len(tail))
+	second := `"result":{"x":"` + pad + `"}}`
+	if len(head)+1+len(second) != maxMessageBytes {
+		t.Fatalf("test setup: event is %d bytes", len(head)+1+len(second))
+	}
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, _ string) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: "+head+"\ndata: "+second+"\n\n")
+	})
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":32,"method":"tools/list"}`))
+	got := receiveWithin(t, tr, 5*time.Second)
+	if !strings.Contains(got, `"result"`) || strings.Contains(got, "-32603") {
+		t.Errorf("an event of exactly the limit was refused: %q", got[:min(len(got), 200)])
+	}
+}
+
+// ADR-0008 §11.2: the remaining cases of an unsendable request, and a legacy
+// version that cannot go into a header.
+func TestPromptsAndResourcesWithoutTheirNameAreNotSent(t *testing.T) {
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, _ string) { w.WriteHeader(500) })
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":41,"method":"prompts/get","params":{` + modernMeta + `}}`,
+		`{"jsonrpc":"2.0","id":41,"method":"resources/read","params":{` + modernMeta + `}}`,
+	} {
+		_ = tr.Send([]byte(body))
+		if got := receiveWithin(t, tr, time.Second); !strings.Contains(got, "-32602") {
+			t.Errorf("answer %q", got)
+		}
+	}
+	if rec.count() != 0 {
+		t.Errorf("an unsendable request reached the upstream")
+	}
+}
+
+func TestALegacyVersionThatCannotBeAHeaderIsLeftOut(t *testing.T) {
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, body string) {
+		if strings.Contains(body, `"initialize"`) {
+			jsonAnswer(w, `{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18\r\nX-Injected: 1","capabilities":{},"serverInfo":{"name":"s","version":"1"}}}`)
+			return
+		}
+		jsonAnswer(w, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}`, idOf(body)))
+	})
+	var logs syncBuffer
+	tr, _ := NewHTTP(srv.URL, WithLogs(&logs))
+	defer tr.Close()
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`))
+	receiveWithin(t, tr, time.Second)
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	if got := receiveWithin(t, tr, time.Second); !strings.Contains(got, `"tools"`) {
+		t.Errorf("the request was not sent: %q", got)
+	}
+	if h := rec.last().header; h.Get("MCP-Protocol-Version") != "" || h.Get("X-Injected") != "" {
+		t.Errorf("headers %v", h)
+	}
+	if !strings.Contains(logs.String(), "without MCP protocol headers") {
+		t.Errorf("log %q", logs.String())
+	}
+}

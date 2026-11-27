@@ -187,6 +187,14 @@ func (t *httpTransport) prepare(data []byte) (*outgoing, error) {
 			t.logf("forwarding a batch without MCP protocol headers")
 			return out, nil
 		}
+		if !isModern(data) {
+			// A legacy message fails only when the negotiated version cannot
+			// go into a header. It goes without protocol headers, as before
+			// the migration, so that one bad version does not make the whole
+			// session unusable (ADR-0008 §11.2).
+			t.logf("sending a message without MCP protocol headers: %v", err)
+			return out, nil
+		}
 		if out.id != nil {
 			// The message would contradict its own headers, so it is not sent.
 			// httpwire's error names the argument and the tool, never a value.
@@ -320,6 +328,11 @@ func (t *httpTransport) route(resp *http.Response, out *outgoing) error {
 	outcome := httpwire.Classify(out.id, status, contentType, body)
 	switch outcome.Kind {
 	case httpwire.Accepted:
+		if out.id != nil {
+			// A request needs an answer; an empty one would leave it waiting
+			// for ever (ADR-0008 §11.1).
+			return t.answerOwn(out.id, fmt.Sprintf("upstream answered HTTP %d with no body", status))
+		}
 		return nil
 	case httpwire.Drop:
 		if !ok2xx {
@@ -491,7 +504,11 @@ func (t *httpTransport) consumeStream(body io.ReadCloser, openID json.RawMessage
 			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		case strings.HasPrefix(line, "data:"):
 			data := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
-			size += len(data) + 1
+			// The joined size: the lines and the newlines between them.
+			if len(dataLines) > 0 {
+				size++
+			}
+			size += len(data)
 			if size > maxMessageBytes {
 				overflow = true
 			}
@@ -515,6 +532,11 @@ func (t *httpTransport) consumeStream(body io.ReadCloser, openID json.RawMessage
 	// A stream that ends without a trailing blank line still had a complete
 	// event pending.
 	flush()
+	if openID != nil && !answered {
+		// The stream ended — closed by the server, cut, or broken — without
+		// the answer to the request that opened it (ADR-0008 §11.1).
+		_ = t.answerOwn(openID, "upstream stream ended without an answer")
+	}
 }
 
 // dispatch delivers SSE payload data, unwrapping a batch array into its
@@ -534,6 +556,12 @@ func (t *httpTransport) dispatch(data string, openID json.RawMessage) bool {
 	}
 	answered := false
 	for _, msg := range messages {
+		if !json.Valid(msg) {
+			// wire.Writer would refuse it; dropped here, it leaves the
+			// request to the end-of-stream answer (ADR-0008 §11.1).
+			t.logf("dropping an upstream event that is not JSON")
+			continue
+		}
 		if openID != nil && answers(msg, openID) {
 			answered = true
 		}
@@ -595,4 +623,19 @@ func truncate(b []byte, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+// isModern reports whether a message carries a protocol version in its
+// params._meta — a message of the per-request era.
+func isModern(body []byte) bool {
+	var m struct {
+		Params struct {
+			Meta map[string]json.RawMessage `json:"_meta"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(body, &m) != nil {
+		return false
+	}
+	var v string
+	return json.Unmarshal(m.Params.Meta[metaProtocolVersion], &v) == nil
 }
