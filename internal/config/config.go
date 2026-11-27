@@ -300,6 +300,10 @@ func (s *Server) problems(name string) []error {
 	for header := range s.Headers {
 		if header == "" {
 			add("headers contains an empty header name")
+			continue
+		}
+		if isProtocolHeader(header) {
+			add("headers cannot set %q: mcp-bridge derives the MCP protocol headers from each message (ADR-0008 §4)", header)
 		}
 	}
 
@@ -395,4 +399,17 @@ func (o *OAuth) problems(name string) []error {
 	}
 
 	return errs
+}
+
+// isProtocolHeader reports whether name is one of the MCP protocol headers
+// the transport derives from each message body: MCP-Protocol-Version,
+// Mcp-Method, Mcp-Name, or any Mcp-Param-*. Header names are
+// case-insensitive.
+func isProtocolHeader(name string) bool {
+	n := strings.ToLower(name)
+	switch n {
+	case "mcp-protocol-version", "mcp-method", "mcp-name":
+		return true
+	}
+	return strings.HasPrefix(n, "mcp-param-")
 }

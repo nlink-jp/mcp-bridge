@@ -351,3 +351,24 @@ func TestCallbackHostIsAccepted(t *testing.T) {
 		}
 	}
 }
+
+// The transport derives the MCP protocol headers from each message; a static
+// header of the same name would contradict the body (ADR-0008 §4).
+func TestProtocolHeadersCannotBeConfigured(t *testing.T) {
+	for _, name := range []string{
+		"MCP-Protocol-Version", "mcp-protocol-version", "Mcp-Method", "MCP-METHOD",
+		"Mcp-Name", "Mcp-Param-Owner", "mcp-param-x",
+	} {
+		msg := loadErr(t, `{"servers":{"s":{"url":"https://e.example.com/mcp","headers":{"`+name+`":"v"}}}}`)
+		if !strings.Contains(msg, "cannot set") || !strings.Contains(msg, name) {
+			t.Errorf("%s: error %q does not refuse the protocol header", name, msg)
+		}
+	}
+	// Names that only resemble one are ordinary headers.
+	for _, name := range []string{"X-Mcp-Method", "Mcp-Session", "Mcp-Parameter"} {
+		path := write(t, `{"servers":{"s":{"url":"https://e.example.com/mcp","headers":{"`+name+`":"v"}}}}`)
+		if _, err := Load(path); err != nil {
+			t.Errorf("%s was refused: %v", name, err)
+		}
+	}
+}
