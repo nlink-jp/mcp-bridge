@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-27
+
 ### Changed
 
 - **The OAuth discovery probe no longer writes its own `initialize`** (ADR-0009).
@@ -409,6 +411,10 @@ endpoint.
 - Out of scope by decision, not omission: governance gates, audit receipts,
   telemetry export, tool masking, and the client_credentials flow.
 
+[0.4.3]: https://github.com/nlink-jp/mcp-bridge/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/nlink-jp/mcp-bridge/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/nlink-jp/mcp-bridge/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/nlink-jp/mcp-bridge/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/nlink-jp/mcp-bridge/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nlink-jp/mcp-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nlink-jp/mcp-bridge/compare/v0.1.1...v0.2.0
