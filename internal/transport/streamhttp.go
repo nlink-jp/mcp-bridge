@@ -3,6 +3,7 @@ package transport
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nlink-jp/mcp/httpwire"
@@ -63,6 +65,11 @@ type httpTransport struct {
 	// streams counts in-flight SSE readers so Close can wait for them rather
 	// than racing their sends against the closed channel.
 	streams sync.WaitGroup
+
+	// refreshMu serializes the tools/list refreshes a HeaderMismatch starts;
+	// refreshSeq numbers their ids (ADR-0008 §6).
+	refreshMu  sync.Mutex
+	refreshSeq atomic.Uint64
 }
 
 // Option configures an HTTP transport.
@@ -147,6 +154,10 @@ type outgoing struct {
 	method string
 	// header holds the MCP protocol headers derived from the body.
 	header http.Header
+	// retried marks the one resend after a HeaderMismatch (ADR-0008 §6).
+	retried bool
+	// ctx bounds the request; nil means none. Only refreshes set one.
+	ctx context.Context
 }
 
 // Send posts one message and routes whatever the server sends back.
@@ -190,9 +201,18 @@ func (t *httpTransport) prepare(data []byte) (*outgoing, error) {
 // exchange posts the message, renewing the token once on a 401, and routes
 // the answer.
 func (t *httpTransport) exchange(out *outgoing) error {
-	resp, err := t.post(out)
+	resp, err := t.postRenewing(out)
 	if err != nil {
 		return err
+	}
+	return t.route(resp, out)
+}
+
+// postRenewing posts the message, renewing the token once on a 401.
+func (t *httpTransport) postRenewing(out *outgoing) (*http.Response, error) {
+	resp, err := t.post(out)
+	if err != nil {
+		return nil, err
 	}
 
 	// A 401 usually means the access token expired. Drop it and try once with
@@ -207,15 +227,14 @@ func (t *httpTransport) exchange(out *outgoing) error {
 		t.auth.Invalidate()
 		resp, err = t.post(out)
 		if err != nil {
-			return fmt.Errorf("upstream rejected the credentials (HTTP 401): %w", err)
+			return nil, fmt.Errorf("upstream rejected the credentials (HTTP 401): %w", err)
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			body := readSnippet(resp)
-			return fmt.Errorf("upstream rejected the credentials (HTTP 401) again after renewing the token: %s", body)
+			return nil, fmt.Errorf("upstream rejected the credentials (HTTP 401) again after renewing the token: %s", body)
 		}
 	}
-
-	return t.route(resp, out)
+	return resp, nil
 }
 
 // post performs one HTTP POST with the configured authentication and the
@@ -229,7 +248,11 @@ func (t *httpTransport) post(out *outgoing) (*http.Response, error) {
 	endpoint, sessionID := t.endpoint, t.sessionID
 	t.mu.Unlock()
 
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(out.body))
+	ctx := out.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(out.body))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -309,6 +332,9 @@ func (t *httpTransport) route(resp *http.Response, out *outgoing) error {
 	}
 
 	// Deliver.
+	if status == http.StatusBadRequest && t.isHeaderMismatch(out, body) {
+		return t.retryAfterMismatch(out, outcome.Body)
+	}
 	if ok2xx && !json.Valid(bytes.TrimSpace(body)) {
 		// wire.Writer refuses what is not JSON, so without an answer here the
 		// request would wait for ever (ADR-0008 §3). The body is quoted in the
