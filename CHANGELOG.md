@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-27
+
 ### Fixed
 
 - **A stream that answered its request under a re-spelled id no longer gets a
