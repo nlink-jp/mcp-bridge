@@ -307,31 +307,62 @@ func TestAFailureAfterTheFirstPageKeepsItsMarks(t *testing.T) {
 	}
 }
 
-// A refresh as a whole is bounded (ADR-0008 §11.4).
+// A refresh as a whole is bounded (ADR-0008 §11.4): two pages, each within
+// the deadline on its own, exceed it together.
 func TestARefreshPastItsDeadlineFails(t *testing.T) {
 	old := refreshTimeout
-	refreshTimeout = 200 * time.Millisecond
+	refreshTimeout = 300 * time.Millisecond
 	defer func() { refreshTimeout = old }()
 
 	var rec recorder
 	srv := rec.server(t, func(w http.ResponseWriter, body string) {
 		id := idOf(body)
 		if strings.Contains(body, `"tools/list"`) {
-			time.Sleep(time.Second)
-			jsonAnswer(w, fmt.Sprintf(toolsWithOwnerMark, id))
+			time.Sleep(200 * time.Millisecond)
+			if strings.Contains(body, `"cursor"`) {
+				jsonAnswer(w, fmt.Sprintf(toolsWithOwnerMark, id))
+				return
+			}
+			jsonAnswer(w, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"tools":[],"nextCursor":"p2"}}`, id))
 			return
 		}
-		rejectWithoutParam(w, id, false)
+		rejectWithoutParam(w, id, rec.last().header.Get("Mcp-Param-Owner") != "")
 	})
 	tr, _ := NewHTTP(srv.URL)
 	defer tr.Close()
 
-	start := time.Now()
 	_ = tr.Send(modernCall(62))
 	if got := receiveWithin(t, tr, 2*time.Second); !strings.Contains(got, "-32020") {
-		t.Errorf("answer %s", got)
+		t.Errorf("a refresh of two 200 ms pages finished within a 300 ms deadline: %s", got)
 	}
-	if d := time.Since(start); d > 900*time.Millisecond {
-		t.Errorf("the refresh ran %v past a 200 ms deadline", d)
+}
+
+// The joined size of a refresh's SSE event may be exactly the limit.
+func TestARefreshEventOfExactlyTheLimitIsRead(t *testing.T) {
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, body string) {
+		id := idOf(body)
+		if strings.Contains(body, `"tools/list"`) {
+			head := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,`, id)
+			list := fmt.Sprintf(toolsWithOwnerMark, id)
+			list = list[strings.Index(list, `"result":`):]
+			// Pad the tool's description so the joined event is exactly the limit.
+			pad := maxMessageBytes - len(head) - 1 - len(list) - len(`,"description":""`)
+			list = strings.Replace(list, `"name":"get_repo"`, `"name":"get_repo","description":"`+strings.Repeat("a", pad)+`"`, 1)
+			if len(head)+1+len(list) != maxMessageBytes {
+				t.Errorf("test setup: event is %d bytes", len(head)+1+len(list))
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: "+head+"\ndata: "+list+"\n\n")
+			return
+		}
+		rejectWithoutParam(w, id, rec.last().header.Get("Mcp-Param-Owner") != "")
+	})
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+
+	_ = tr.Send(modernCall(63))
+	if got := receiveWithin(t, tr, 5*time.Second); !strings.Contains(got, `"ok"`) {
+		t.Errorf("a refresh event of exactly the limit was refused: %s", got[:min(len(got), 200)])
 	}
 }

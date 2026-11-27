@@ -350,3 +350,15 @@ func TestWriteFailureDoesNotQuoteTheMessage(t *testing.T) {
 		t.Errorf("the failure was not logged: %q", logs.String())
 	}
 }
+
+// JSON that is not a JSON-RPC message is an invalid request, not a parse
+// error (ADR-0008 §11.6).
+func TestJSONThatIsNotAMessageGetsInvalidRequest(t *testing.T) {
+	for _, line := range []string{`5`, `{"jsonrpc":"2.0","id":1,"method":5}`} {
+		up := newFake()
+		out, _ := run(t, up, line+"\n", nil)
+		if !strings.Contains(out, "-32600") || !strings.Contains(out, `"id":null`) {
+			t.Errorf("%s was answered %q", line, out)
+		}
+	}
+}

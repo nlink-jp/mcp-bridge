@@ -417,6 +417,9 @@ func TestRequestsThatWouldStayUnansweredAreAnswered(t *testing.T) {
 			var got string
 			for i := 0; i < 2; i++ { // a progress notification may come first
 				got = receiveWithin(t, tr, 2*time.Second)
+				if !json.Valid([]byte(got)) {
+					t.Fatalf("a message that is not JSON reached the client: %q", got)
+				}
 				if strings.Contains(got, `"id":31`) {
 					break
 				}
@@ -518,5 +521,104 @@ func TestALegacyVersionThatCannotBeAHeaderIsLeftOut(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "without MCP protocol headers") {
 		t.Errorf("log %q", logs.String())
+	}
+}
+
+// ADR-0008 §11.5: a 2xx response that does not name the request is delivered
+// under the request's id.
+func TestA2xxAnswerUnderTheWrongIDIsCorrected(t *testing.T) {
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"no session"}}`,
+		`{"jsonrpc":"2.0","result":{"tools":[]}}`,
+		`{"jsonrpc":"2.0","id":999,"result":{"tools":[]}}`,
+	} {
+		var rec recorder
+		srv := rec.server(t, func(w http.ResponseWriter, _ string) { jsonAnswer(w, body) })
+		tr, _ := NewHTTP(srv.URL)
+		_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":71,"method":"tools/list"}`))
+		if got := receiveWithin(t, tr, time.Second); !strings.Contains(got, `"id":71`) {
+			t.Errorf("%s was delivered as %s", body, got)
+		}
+		_ = tr.Close()
+	}
+}
+
+// A stream that answered its request gets no synthesized answer after it,
+// whether it then ends or overflows.
+func TestAnAnsweredStreamGetsNoExtraAnswer(t *testing.T) {
+	answer := `{"jsonrpc":"2.0","id":72,"result":{"tools":[]}}`
+	for name, tail := range map[string]string{
+		"ends":      "",
+		"overflows": "data: " + strings.Repeat("a", maxMessageBytes+1) + "\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var rec recorder
+			srv := rec.server(t, func(w http.ResponseWriter, _ string) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "event: message\ndata: "+answer+"\n\n"+tail)
+			})
+			tr, _ := NewHTTP(srv.URL)
+			defer tr.Close()
+			_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":72,"method":"tools/list"}`))
+			if got := receiveWithin(t, tr, 5*time.Second); !strings.Contains(got, `"result"`) {
+				t.Fatalf("answer %q", got)
+			}
+			ch := make(chan []byte, 1)
+			go func() {
+				if m, ok := tr.Receive(); ok {
+					ch <- m
+				}
+			}()
+			select {
+			case m := <-ch:
+				t.Errorf("a second answer reached the client: %s", m[:min(len(m), 200)])
+			case <-time.After(300 * time.Millisecond):
+			}
+		})
+	}
+}
+
+// ADR-0008 §11.2: a modern request whose version cannot be a header is not
+// sent.
+func TestAModernRequestWithAnUnsafeVersionIsNotSent(t *testing.T) {
+	var rec recorder
+	srv := rec.server(t, func(w http.ResponseWriter, _ string) { w.WriteHeader(500) })
+	tr, _ := NewHTTP(srv.URL)
+	defer tr.Close()
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":73,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28\r\nX: 1","io.modelcontextprotocol/clientCapabilities":{}}}}`))
+	if got := receiveWithin(t, tr, time.Second); !strings.Contains(got, "-32602") {
+		t.Errorf("answer %q", got)
+	}
+	if rec.count() != 0 {
+		t.Error("the request reached the upstream")
+	}
+}
+
+// ADR-0008 §11.7: a version the HTTP client would refuse is left off the
+// DELETE, so the session is still ended.
+func TestTheDeleteGoesWithoutAnUnsafeVersion(t *testing.T) {
+	deleted := make(chan http.Header, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleted <- r.Header.Clone()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", "s1")
+		jsonAnswer(w, `{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18\r\nX-Injected: 1","capabilities":{},"serverInfo":{"name":"s","version":"1"}}}`)
+	}))
+	defer srv.Close()
+
+	tr, _ := NewHTTP(srv.URL)
+	_ = tr.Send([]byte(`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`))
+	receiveWithin(t, tr, time.Second)
+	_ = tr.Close()
+	select {
+	case h := <-deleted:
+		if h.Get("MCP-Protocol-Version") != "" || h.Get("X-Injected") != "" {
+			t.Errorf("DELETE headers %v", h)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no DELETE: the session was not ended")
 	}
 }
