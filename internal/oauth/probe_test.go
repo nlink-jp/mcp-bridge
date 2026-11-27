@@ -128,7 +128,9 @@ func TestProbeAnsweredWithoutAChallengeIsOneRequest(t *testing.T) {
 
 // A server that does not answer in time gets one request too: the module
 // reads a deadline as "no answer" and would fall back to its legacy opening,
-// which the probe must not send.
+// which the probe must not send. The HTTP client's timeout fires well inside
+// the probe's, so the module sees the deadline error from Send while its own
+// context is still live — the path that falls back.
 func TestProbeThatTimesOutIsOneRequest(t *testing.T) {
 	release := make(chan struct{})
 	pt := newProbeTarget(t, func(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +142,10 @@ func TestProbeThatTimesOutIsOneRequest(t *testing.T) {
 	t.Cleanup(func() { close(release) }) // runs before the server closes
 
 	req := pt.request()
-	req.probeTimeout = 100 * time.Millisecond
+	short := *pt.Client()
+	short.Timeout = 100 * time.Millisecond
+	req.client = &short
+	req.probeTimeout = 10 * time.Second
 	got, err := probeChallenge(req)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the timeout", err)
