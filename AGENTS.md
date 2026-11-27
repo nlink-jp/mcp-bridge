@@ -138,7 +138,9 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
   require line is nlink-jp/mcp, an organization module under the same rule.
 - **The MCP protocol headers come from the body, never from the config.**
   `httpwire.Tracker.Outgoing` derives `MCP-Protocol-Version`, `Mcp-Method`,
-  `Mcp-Name` and `Mcp-Param-*` for every POST, after the static headers; the
+  `Mcp-Name` and `Mcp-Param-*` for a modern request, and the negotiated
+  `MCP-Protocol-Version` for every legacy message after `initialize` (and the
+  session's DELETE), after the static headers; the
   config refuses those names (ADR-0008 §4). A request whose headers cannot be
   derived is answered with -32602 and not sent; a batch goes without them.
 - **Every answer passes through the Tracker before delivery** — a JSON body and

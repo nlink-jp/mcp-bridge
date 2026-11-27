@@ -229,14 +229,20 @@ every request. mcp-bridge does not convert between the two: the upstream sees
 the era your client opens, so a client that speaks both reaches servers of
 either kind. What the specification asks of an HTTP client is added on the way:
 
-- every POST carries the `MCP-Protocol-Version` header — the negotiated version
-  for a handshake session, the request's own for the newer protocol — with
+- a request in the newer protocol carries its `MCP-Protocol-Version` with
   `Mcp-Method`, `Mcp-Name` and the `Mcp-Param-*` headers a tool's schema asks
-  for (`x-mcp-header`);
+  for (`x-mcp-header`); in a handshake session, every message after
+  `initialize` carries the negotiated `MCP-Protocol-Version` (a batch goes
+  without it). A request whose headers cannot be built — an argument a header
+  cannot carry, a tool call without a tool name — is answered with an error and
+  not sent;
 - a tool whose `x-mcp-header` declaration is invalid is left out of the tool
   list, and the bridge's log says which and why;
 - if the server refuses a tool call because those headers no longer match its
-  tools, mcp-bridge reads the tool list once and sends the call again.
+  tools, mcp-bridge reads the tool list once and sends the call again;
+- a request the server leaves unanswered — an empty answer, a stream that ends
+  without the answer, an answer larger than 8 MiB — gets an error instead of
+  waiting for ever.
 
 These headers are mcp-bridge's to set: `headers` in the config cannot name
 them. `inspect` opens the server in the newer protocol when it offers it, and

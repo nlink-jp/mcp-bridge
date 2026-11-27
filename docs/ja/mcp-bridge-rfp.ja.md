@@ -136,6 +136,7 @@ Go、外部依存ゼロ。OAuth の client_secret とアクセストークンを
 - レシート監査、SHA-256 ハッシュチェーン、`--view` / `--verify` / `--explain` / `--receipts`
 - メタツール注入（`governance_*` 5 種）
 - tool masking
+  - *ADR-0008 で明確にした（2026-11-27）:* MCP の仕様が HTTP のクライアントに除けと求めるツール（`x-mcp-header` の印が不正なもの）を除くことは、masking ではない。
 - OTLP / Splunk HEC / webhook のテレメトリエクスポート
 - `enforcement`（strict/advisory）と `schema`（off/warn/strict）の 2 ノブ
 - client_credentials フロー

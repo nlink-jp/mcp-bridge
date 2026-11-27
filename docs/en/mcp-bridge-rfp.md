@@ -136,6 +136,7 @@ Downstream is always stdio; upstream is Streamable HTTP only. This is not a bidi
 - Receipt auditing, the SHA-256 hash chain, and `--view` / `--verify` / `--explain` / `--receipts`
 - Meta-tool injection (the five `governance_*` tools)
 - Tool masking
+  - *Clarified by ADR-0008 (2026-11-27):* removing the tools the MCP specification says an HTTP client must exclude (invalid `x-mcp-header` marks) is not masking.
 - OTLP / Splunk HEC / webhook telemetry export
 - The `enforcement` (strict/advisory) and `schema` (off/warn/strict) knobs
 - The client_credentials flow

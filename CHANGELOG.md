@@ -49,6 +49,15 @@ by nlink-jp's servers and relays, which itself uses only the standard library.
   newer protocol.** It used to fail its handshake there and report "credential
   accepted" without having tested the credential.
 - **`inspect`'s log is filtered for control characters like `run`'s.**
+- **A request the server leaves unanswered gets an error.** An empty 2xx or a
+  202 to a request, and a stream that ends without the request's answer (an
+  event whose data is not JSON is dropped), are answered with `-32603`.
+- **An SSE event whose data lines together exceed 8 MiB is answered with
+  `-32603`**; the joined size used to be unbounded.
+- **A request whose headers cannot be built is answered with `-32602` and not
+  sent**: an argument a header cannot carry, a `tools/call` or `prompts/get`
+  without a name, a `resources/read` without a URI. A batch is sent without
+  protocol headers.
 
 ## [0.3.1] - 2026-11-26
 
