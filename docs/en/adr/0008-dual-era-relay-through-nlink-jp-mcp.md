@@ -158,6 +158,25 @@ as a hand-written handshake, `.github` is told through an issue when that check 
 of this record). Whether a modern-only upstream checks the body before authentication and answers 400 is
 **not measured**.
 
+### 11. What the pre-release check changed (2026-11-27)
+
+Four points the independent pre-release pass found the design did not define were decided by the operator. Where
+§3–§8 touch them, this section prevails.
+
+1. **A request that would stay unanswered gets `-32603`** (added to §3 and §5). When an SSE stream a request opened
+   ends without that request's answer (an event whose data is not JSON is dropped and logged), and when the answer
+   to a request is an empty 2xx (202 included), the request's `id` gets `-32603`. A 202 or empty 2xx answering a
+   notification still gets nothing.
+2. **The remaining cases of a request whose headers cannot be derived** (added to §4). A `prompts/get` without
+   `params.name` and a `resources/read` without `params.uri` are not sent and get `-32602`, as a `tools/call`
+   without a name does. A legacy message whose negotiated version holds characters a header cannot carry is sent
+   without protocol headers and logged (the behaviour before the migration; one bad version does not make the whole
+   session unusable). A modern request whose version or method cannot go into a header gets `-32602`.
+3. **The DELETE that ends a session** (added to §8). The DELETE ending a session the upstream issued carries the
+   negotiated `MCP-Protocol-Version` too (since 2025-06-18 an HTTP client puts the header on every later request).
+4. **The refresh's deadline** (added to §6). One refresh (up to 10 pages) as a whole is cut off at 60 seconds, and
+   past that it is a failed refresh (a per-page deadline let other requests wait up to 10 minutes).
+
 ## Detailed design
 
 | Component | Change | Oracle (where expected results come from) |
