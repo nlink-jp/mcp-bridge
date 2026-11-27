@@ -14,7 +14,8 @@ direction is not supported.
 
 - Module path: `github.com/nlink-jp/mcp-bridge`
 - Series: util-series
-- Language: Go, standard library only (`go.mod` has zero require lines)
+- Language: Go; the standard library plus `github.com/nlink-jp/mcp` (the
+  shared MCP protocol layer, itself standard library only; ADR-0008)
 - Status: released. Verified against the live Slack MCP server (pre-registered
   OAuth) and the live GitHub MCP server (token command). The pre-registered
   OAuth route for GitHub Apps is untested against a live endpoint. Entra ID is
@@ -47,8 +48,11 @@ main.go                      Entry point: subcommand dispatch, version, usage
 main_test.go                 Pins the CLI surface (see Gotchas)
 internal/config/             Single-file JSON config, strict decode, path resolution
 internal/jsonrpc/            JSON-RPC 2.0 shapes and error-response building
-internal/transport/          Streamable HTTP client (OAuth token provider hook)
-internal/bridge/             Transparent stdio relay
+internal/transport/          Streamable HTTP client (OAuth token provider hook;
+                             MCP headers, Tracker, Classify, HeaderMismatch
+                             retry; a client.Conn for inspect)
+internal/bridge/             stdio relay: the client's era passes through
+                             (lines through nlink-jp/mcp/wire)
 internal/oauth/              authorization_code + PKCE, discovery, DCR, token store
 internal/tokencmd/           Bearer tokens from an external command
 internal/cli/                Subcommand bodies (run, list, login, logout, inspect)
@@ -129,11 +133,28 @@ docs/en/, docs/ja/           Three-layer docs (adr / reference / history);
 - **`WWW-Authenticate` is parsed, not searched.** `bearerParam` reads the
   header by its grammar (`internal/oauth/challenge.go`). Looking for
   `scope="` in the string finds it inside another parameter's quoted text.
-- **Zero dependencies is a hard constraint**, not a preference. It is why config
-  is JSON rather than the org-standard sectioned TOML.
+- **No third-party dependency is a hard constraint**, not a preference. It is
+  why config is JSON rather than the org-standard sectioned TOML. The one
+  require line is nlink-jp/mcp, an organization module under the same rule.
+- **The MCP protocol headers come from the body, never from the config.**
+  `httpwire.Tracker.Outgoing` derives `MCP-Protocol-Version`, `Mcp-Method`,
+  `Mcp-Name` and `Mcp-Param-*` for every POST, after the static headers; the
+  config refuses those names (ADR-0008 §4). A request whose headers cannot be
+  derived is answered with -32602 and not sent; a batch goes without them.
+- **Every answer passes through the Tracker before delivery** — a JSON body and
+  each SSE message — or the negotiated version and the tools' marks are not
+  learned and the next request goes out without its headers.
+- **The HeaderMismatch retry is the only request mcp-bridge originates**
+  (`internal/transport/mismatch.go`): once per request, refreshes serialized,
+  up to 10 pages, answers kept from the client. Do not add another.
+- **Answers that would leave a request waiting are answered**: a 2xx body that
+  is not JSON, and a JSON body, SSE line or SSE event over 8 MiB, get -32603
+  under the request's id. mcp-bridge has no per-request timeout.
 - **Scope is fixed by the RFP** in `docs/ja/mcp-bridge-rfp.ja.md`. Governance
   gates, audit receipts, telemetry export, tool masking, and the
-  client_credentials flow are out of scope by decision.
+  client_credentials flow are out of scope by decision. Removing the tools the
+  MCP specification says must be excluded (invalid `x-mcp-header` marks) is
+  not masking.
 - **An expiry of zero means "no known expiry", not "expired at the epoch".**
   A token with no refresh token is used as stored whatever its expiry says;
   the server is the judge, via a 401. Treating zero as expired makes Slack

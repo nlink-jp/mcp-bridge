@@ -6,6 +6,50 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+mcp-bridge speaks both MCP eras (ADR-0008). MCP 2026-07-28 replaced the
+`initialize` handshake with a version carried on every request; the bridge
+passes the era your client opens through unchanged and adds what the
+specification requires of an HTTP client. It now has one dependency,
+[nlink-jp/mcp](https://github.com/nlink-jp/mcp), the MCP protocol layer shared
+by nlink-jp's servers and relays, which itself uses only the standard library.
+
+### Added
+
+- **The MCP protocol headers on every POST.** A handshake session's requests
+  carry the negotiated `MCP-Protocol-Version` — required since 2025-06-18 and
+  missing until now; servers accepted the requests only because they may treat
+  a missing header as 2025-03-26. A 2026-07-28 request carries its version,
+  `Mcp-Method`, `Mcp-Name`, and the `Mcp-Param-*` headers a tool's schema asks
+  for with `x-mcp-header`.
+- **Tools with an invalid `x-mcp-header` declaration are left out of the tool
+  list**, as the specification requires of an HTTP client; the log names them.
+- **A tool call refused because its headers no longer match the server's tools
+  is sent once more** after mcp-bridge reads the tool list again.
+- **`inspect` names the protocol era** (`2026-07-28 (modern)`, `2025-06-18
+  (legacy)`) and opens a server in the newer protocol when it offers it.
+
+### Changed
+
+- **`headers` in the config cannot name the MCP protocol headers**
+  (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, `Mcp-Param-*`); the config
+  is refused at load. They are derived from each message.
+- **An HTTP error without a JSON-RPC answer** (an HTML 502, an empty 400) is
+  answered with `-32603` under the request's id, and a JSON-RPC error answered
+  with `id: null` arrives under the request's id.
+
+### Fixed
+
+- **One over-long message from the client no longer ends the bridge.** It is
+  skipped and answered with `-32700`; the session goes on.
+- **A large or malformed answer no longer leaves a request waiting for ever.**
+  A JSON body over 8 MiB used to be cut and dropped, an SSE line over 8 MiB
+  ended the stream, and a 2xx body that was not JSON was dropped; each is now
+  answered with `-32603`.
+- **`inspect`'s credential check works against a server that speaks only the
+  newer protocol.** It used to fail its handshake there and report "credential
+  accepted" without having tested the credential.
+- **`inspect`'s log is filtered for control characters like `run`'s.**
+
 ## [0.3.1] - 2026-11-26
 
 Several bridges for one server renew its login one at a time (ADR-0007). An

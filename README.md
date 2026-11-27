@@ -87,7 +87,7 @@ mcp-bridge list             # shows which servers are logged in
 connects and prints what the server says it is, without wiring the bridge into
 an MCP client first.
 
-It works **before** the first login. Many MCP servers answer `initialize` and
+It works **before** the first login. Many MCP servers open a session and answer
 `tools/list` without a credential and only require one for `tools/call`, so
 there is real information to be had — the URL, the protocol version, the tool
 list — while the OAuth app is still being set up. The output says which view it
@@ -165,7 +165,7 @@ Authentication is chosen by which key is present:
 | Key | Behaviour |
 |-----|-----------|
 | none of the below | No authentication |
-| `headers` | Static headers sent with every request |
+| `headers` | Static headers sent with every request (not the MCP protocol headers, which mcp-bridge sets) |
 | `tokenCommand` | Run an external command to obtain a Bearer token |
 | `oauth` with `clientId` and both URLs | OAuth2 authorization_code against a pre-registered client |
 | `oauth` with `clientId` and no URLs | The same client, with the endpoints and scopes taken from what the server publishes |
@@ -221,6 +221,27 @@ Make sure the change was yours, then replace the value.
 `tlsCertSha256` needs an `https` URL and cannot be combined with `oauth`. Update
 mcp-bridge before adding the key: older versions reject it as unknown and stop
 reading the whole file.
+
+## MCP protocol versions
+
+MCP 2026-07-28 replaced the `initialize` handshake with a version carried on
+every request. mcp-bridge does not convert between the two: the upstream sees
+the era your client opens, so a client that speaks both reaches servers of
+either kind. What the specification asks of an HTTP client is added on the way:
+
+- every POST carries the `MCP-Protocol-Version` header — the negotiated version
+  for a handshake session, the request's own for the newer protocol — with
+  `Mcp-Method`, `Mcp-Name` and the `Mcp-Param-*` headers a tool's schema asks
+  for (`x-mcp-header`);
+- a tool whose `x-mcp-header` declaration is invalid is left out of the tool
+  list, and the bridge's log says which and why;
+- if the server refuses a tool call because those headers no longer match its
+  tools, mcp-bridge reads the tool list once and sends the call again.
+
+These headers are mcp-bridge's to set: `headers` in the config cannot name
+them. `inspect` opens the server in the newer protocol when it offers it, and
+its `protocol:` line says which — `2026-07-28 (modern)` or `2025-06-18
+(legacy)`.
 
 ## MCP client integration
 
@@ -343,8 +364,9 @@ client that uses such a server.
   refresh has no expiry we can act on (0003), why there is one strictly
   decoded JSON config file (0004), why a device's certificate is pinned
   rather than left unverified (0005), why a pre-registered client can take
-  its endpoints and scopes from what the server publishes (0006), and why
-  bridges for one server renew its token one at a time (0007)
+  its endpoints and scopes from what the server publishes (0006), why
+  bridges for one server renew its token one at a time (0007), and why both
+  MCP protocol eras pass through unchanged (0008)
 - [RFP](docs/en/mcp-bridge-rfp.md) — the scope decision and what is
   deliberately out of it
 
@@ -357,9 +379,12 @@ make test         # go test ./...
 make check        # lint + test + docs mirror check
 ```
 
-The project uses the Go standard library only — `go.mod` has zero require
-lines. This is deliberate: mcp-bridge handles OAuth client secrets and access
-tokens, so it does not take on third-party supply-chain surface. It is also why
+The project uses the Go standard library and one module of the same
+organization that itself uses only the standard library:
+[nlink-jp/mcp](https://github.com/nlink-jp/mcp), the MCP protocol layer shared by
+nlink-jp's servers and relays. This is deliberate: mcp-bridge handles OAuth
+client secrets and access tokens, so it does not take on third-party
+supply-chain surface. It is also why
 the configuration format is JSON rather than TOML.
 
 ## License

@@ -13,24 +13,34 @@ out of scope.
 
 ## Non-negotiable rules
 
-- **Zero external dependencies.** `go.mod` must have zero require lines. This
-  tool handles OAuth client secrets and access tokens; adding a third-party
-  module is a supply-chain decision, not a convenience decision. It is why the
-  config format is JSON and not TOML, against the org-wide TOML convention.
+- **No third-party dependencies.** `go.mod` requires only modules of the
+  nlink-jp organization that themselves use the standard library alone —
+  today `github.com/nlink-jp/mcp`, the shared MCP protocol layer (ADR-0008).
+  This tool handles OAuth client secrets and access tokens; adding a
+  third-party module is a supply-chain decision, not a convenience decision.
+  It is why the config format is JSON and not TOML, against the org-wide TOML
+  convention.
 - **stdout carries JSON-RPC and nothing else.** Every log line, warning, and
   diagnostic goes to stderr. A stray `fmt.Println` breaks every MCP client that
   connects.
 - **Never widen the scope silently.** The following are out of scope by
   decision, not by omission: governance gates, audit receipts, hash chains,
-  meta-tool injection, tool masking, OTLP / Splunk / webhook telemetry, the
-  client_credentials flow, and any reverse (HTTP-to-stdio-server) direction. If
-  one of these looks necessary, raise it before writing code.
+  meta-tool injection, tool masking (removing the tools the MCP specification
+  says an HTTP client must exclude is not masking), OTLP / Splunk / webhook
+  telemetry, the client_credentials flow, and any reverse
+  (HTTP-to-stdio-server) direction. If one of these looks necessary, raise it
+  before writing code.
 - **The config is one file with one shape.** `~/.config/mcp-bridge/config.json`,
   strictly decoded. Do not add a second tier, a per-server file, or a key that
   is read at one time by one command and ignored elsewhere — that combination is
   exactly what made the predecessor unreadable.
-- **JSON-RPC passes through unmodified.** Do not add special handling for
-  `initialize`, `tools/list`, or `tools/call`.
+- **The era passes through; bodies keep their content** (ADR-0008). The
+  transport reads each body to derive the MCP protocol headers, removes tools
+  whose `x-mcp-header` marks are invalid, answers what the upstream did not
+  answer as JSON-RPC, and retries a HeaderMismatch once — through
+  nlink-jp/mcp, never by hand. mcp-bridge answers neither `initialize` nor
+  `server/discover` itself and converts no era. Add no other handling of
+  `initialize`, `tools/list` or `tools/call`.
 - **On upstream forward failure, always answer the client** with a JSON-RPC
   error. Silence makes the client block until its own timeout and hides the real
   cause (usually an expired token).

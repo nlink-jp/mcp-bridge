@@ -41,6 +41,7 @@ Two flags in total. `--version` is also accepted as an alias (org rule: every CL
 - **Upstream (MCP server side)**: Streamable HTTP only. JSON POST plus an SSE stream.
 - **Logging**: stderr only. Writing anything but JSON-RPC to stdout breaks the MCP connection, so this separation is strict.
 - **Relay policy**: JSON-RPC messages pass through unmodified. There is no special handling of `initialize`, `tools/list`, or `tools/call` (mcp-guardian did schema caching, meta-tool injection, and masking there; all are dropped).
+  - *Amended by ADR-0008 (2026-11-27):* bodies keep their content and the client's MCP era passes through, but the relay reads each body to derive the protocol headers MCP 2026-07-28 requires, removes tools whose `x-mcp-header` marks are invalid, and retries a HeaderMismatch once.
 - **When forwarding upstream fails, the client's request always receives a JSON-RPC error response** (inherited from mcp-guardian ADR-0002). Staying silent makes the client block until its own timeout, hiding the actual reason — such as an expired token that needs a fresh login.
 
 ### Configuration
@@ -97,6 +98,7 @@ State lives in `~/.config/mcp-bridge/state/<name>/` and holds only `tokens.json`
 ### External Dependencies
 
 - Go standard library only. `go.mod` keeps zero require lines.
+  - *Amended by ADR-0008 (2026-11-27):* plus `github.com/nlink-jp/mcp`, an organization module that itself uses only the standard library.
 - At runtime, the only external dependencies are the target MCP server and its OAuth authorization server.
 - `tokenCommand` additionally requires whatever command the user names (e.g. `gcloud`) to be on PATH.
 

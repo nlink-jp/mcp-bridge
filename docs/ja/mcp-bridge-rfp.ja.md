@@ -41,6 +41,7 @@ Claude Code は `type: "http"` の MCP サーバを DCR ベースの OAuth で�
 - **上流（MCP サーバ側）**: Streamable HTTP のみ。JSON POST + SSE ストリーム。
 - **ログ**: 全て stderr。stdout に JSON-RPC 以外を出すと MCP 接続が壊れるため、この分離は厳守する。
 - **中継方針**: JSON-RPC メッセージは原則として無改変で中継する。`initialize` / `tools/list` / `tools/call` の特別扱いは行わない（mcp-guardian はここでスキーマキャッシュ・メタツール注入・マスキングを行っていたが、いずれも本ツールでは廃止）。
+  - *ADR-0008 で改めた（2026-11-27）:* 本文の中身は変えず、クライアントの MCP の時代もそのまま通す。ただし中継は本文を読んで MCP 2026-07-28 が求めるプロトコルのヘッダを作り、`x-mcp-header` の印が不正なツールを除き、HeaderMismatch を 1 回だけやり直す。
 - **上流への転送に失敗した場合、クライアントのリクエストには必ず JSON-RPC エラー応答を返す**（mcp-guardian ADR-0002 を継承）。無応答にするとクライアントが自身のタイムアウトまでブロックし、「トークン失効。再ログインが必要」といった実際の理由が利用者に見えない。
 
 ### Configuration
@@ -97,6 +98,7 @@ Claude Code は `type: "http"` の MCP サーバを DCR ベースの OAuth で�
 ### External Dependencies
 
 - Go 標準ライブラリのみ。`go.mod` の require 行はゼロを維持する。
+  - *ADR-0008 で改めた（2026-11-27）:* `github.com/nlink-jp/mcp`（標準ライブラリだけで書かれた組織のモジュール）を加える。
 - 実行時の外部依存は接続先の MCP サーバと、その OAuth 認可サーバのみ。
 - `tokenCommand` を使う場合のみ、利用者が指定した外部コマンド（`gcloud` 等）が PATH 上に必要。
 
