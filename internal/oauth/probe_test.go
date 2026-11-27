@@ -129,8 +129,10 @@ func TestProbeAnsweredWithoutAChallengeIsOneRequest(t *testing.T) {
 // A server that does not answer in time gets one request too: the module
 // reads a deadline as "no answer" and would fall back to its legacy opening,
 // which the probe must not send. The HTTP client's timeout fires well inside
-// the probe's, so the module sees the deadline error from Send while its own
-// context is still live — the path that falls back.
+// the probe's, while the module's context is still live: were Send to return
+// that deadline error and the guard against a second Send both gone, Open
+// would fall back and this test would see two requests. Each defence alone is
+// pinned by TestProbeConnSendsOnce and TestProbeConnFailedRequestEndsTheOpening.
 func TestProbeThatTimesOutIsOneRequest(t *testing.T) {
 	release := make(chan struct{})
 	pt := newProbeTarget(t, func(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +188,33 @@ func TestProbeConnSendsOnce(t *testing.T) {
 	}
 	if n := pt.count(); n != 1 {
 		t.Errorf("%d requests, want exactly one", n)
+	}
+}
+
+// A request that fails still ends the opening with errProbeAnswered — not the
+// failure itself, which client.Open would read, for a deadline, as "no
+// answer" and fall back on — and the failure is kept in the outcome.
+func TestProbeConnFailedRequestEndsTheOpening(t *testing.T) {
+	release := make(chan struct{})
+	pt := newProbeTarget(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	t.Cleanup(func() { close(release) })
+	short := *pt.Client()
+	short.Timeout = 50 * time.Millisecond
+	conn := newProbeConn(&short, pt.URL+"/mcp")
+	defer conn.Close()
+
+	msg := []byte(`{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`)
+	if err := conn.Send(context.Background(), msg); !errors.Is(err, errProbeAnswered) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Send = %v, want errProbeAnswered and not the deadline", err)
+	}
+	out, ok := conn.outcome()
+	if !ok || !errors.Is(out.err, context.DeadlineExceeded) {
+		t.Errorf("outcome = %+v, %v; want the timeout kept", out, ok)
 	}
 }
 
