@@ -105,6 +105,11 @@ func (b *Bridge) pumpClient() error {
 			// Nothing to address a response to: the id is inside the message
 			// that would not parse.
 			b.logf("ignoring unparseable message from the client: %v", err)
+			if json.Valid(msg) {
+				// JSON, but not a JSON-RPC message (ADR-0008 §11.6).
+				b.write(jsonrpc.NewErrorResponse(nil, jsonrpc.CodeInvalidRequest, "invalid JSON-RPC message"))
+				continue
+			}
 			b.write(jsonrpc.NewErrorResponse(nil, jsonrpc.CodeParseError, "invalid JSON-RPC message"))
 			continue
 		}

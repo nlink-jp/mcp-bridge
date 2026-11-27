@@ -188,10 +188,12 @@ func (t *httpTransport) prepare(data []byte) (*outgoing, error) {
 			return out, nil
 		}
 		if !isModern(data) {
-			// A legacy message fails only when the negotiated version cannot
-			// go into a header. It goes without protocol headers, as before
-			// the migration, so that one bad version does not make the whole
-			// session unusable (ADR-0008 §11.2).
+			// For a message the bridge has parsed, a legacy message fails only
+			// when the negotiated version cannot go into a header (the bridge
+			// drops what jsonrpc.Parse rejects before it gets here). It goes
+			// without protocol headers, as before the migration, so that one
+			// bad version does not make the whole session unusable
+			// (ADR-0008 §11.2).
 			t.logf("sending a message without MCP protocol headers: %v", err)
 			return out, nil
 		}
@@ -362,6 +364,11 @@ func (t *httpTransport) route(resp *http.Response, out *outgoing) error {
 		t.logf("upstream sent a body that is not JSON: %s", truncate(body, 200))
 		return t.answerOwn(out.id, fmt.Sprintf("upstream answered HTTP %d with a body that is not JSON", status))
 	}
+	if ok2xx && out.id != nil {
+		// The rule Classify applies to non-2xx answers: a response that does
+		// not name the request would leave it waiting (ADR-0008 §11.5).
+		return t.deliverMessage(underID(outcome.Body, out.id))
+	}
 	return t.deliverMessage(outcome.Body)
 }
 
@@ -450,7 +457,9 @@ func (t *httpTransport) Close() error {
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
-	if legacy := t.tracker.LegacyVersion(); legacy != "" {
+	if legacy := t.tracker.LegacyVersion(); legacy != "" && validHeaderValue(legacy) {
+		// A value the HTTP client would refuse would stop the DELETE itself
+		// (ADR-0008 §11.7).
 		req.Header.Set(httpwire.HeaderProtocolVersion, legacy)
 	}
 	if resp, err := t.client.Do(req); err == nil {
@@ -638,4 +647,42 @@ func isModern(body []byte) bool {
 	}
 	var v string
 	return json.Unmarshal(m.Params.Meta[metaProtocolVersion], &v) == nil
+}
+
+// underID returns body with its id set to id when body is a single response
+// (result or error, no method) whose id is absent, null or another one;
+// otherwise body unchanged.
+func underID(body []byte, id json.RawMessage) []byte {
+	var msg map[string]json.RawMessage
+	if json.Unmarshal(bytes.TrimSpace(body), &msg) != nil {
+		return body
+	}
+	if _, isMethod := msg["method"]; isMethod {
+		return body
+	}
+	_, hasResult := msg["result"]
+	_, hasError := msg["error"]
+	if !hasResult && !hasError {
+		return body
+	}
+	if raw, ok := msg["id"]; ok && sameID(raw, id) {
+		return body
+	}
+	msg["id"] = id
+	out, err := json.Marshal(msg)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+// validHeaderValue reports whether net/http will send s as a header value:
+// no control character other than a horizontal tab.
+func validHeaderValue(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < 0x20 && c != '\t') || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }
