@@ -257,7 +257,7 @@ func TestErrorStatusWithJSONRPCBodyIsForwarded(t *testing.T) {
 	tr, _ := NewHTTP(srv.URL)
 	defer tr.Close()
 
-	if err := tr.Send([]byte(`{}`)); err != nil {
+	if err := tr.Send([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)); err != nil {
 		t.Fatalf("a JSON-RPC error body was turned into a transport error: %v", err)
 	}
 	if got := receiveWithin(t, tr, time.Second); !strings.Contains(got, "bad request") {
@@ -265,9 +265,10 @@ func TestErrorStatusWithJSONRPCBodyIsForwarded(t *testing.T) {
 	}
 }
 
-// An HTTP error that is not a JSON-RPC answer must surface as a transport
-// error rather than being handed to the client as a message.
-func TestErrorStatusWithHTMLBodyIsAnError(t *testing.T) {
+// An HTTP error that is not a JSON-RPC answer is answered with a synthesized
+// -32603 under the request's id (httpwire.Classify; ADR-0008 §3). It is not a
+// recognized modern error, so a dual-era client falls back.
+func TestErrorStatusWithHTMLBodyIsAnsweredWithInternalError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusBadGateway)
@@ -278,12 +279,34 @@ func TestErrorStatusWithHTMLBodyIsAnError(t *testing.T) {
 	tr, _ := NewHTTP(srv.URL)
 	defer tr.Close()
 
-	err := tr.Send([]byte(`{}`))
-	if err == nil {
-		t.Fatal("HTTP 502 was not reported as an error")
+	if err := tr.Send([]byte(`{"jsonrpc":"2.0","id":7,"method":"tools/list"}`)); err != nil {
+		t.Fatalf("Send: %v", err)
 	}
-	if !strings.Contains(err.Error(), "502") {
-		t.Errorf("error does not name the status: %v", err)
+	got := receiveWithin(t, tr, time.Second)
+	for _, want := range []string{`"id":7`, "-32603", "502"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("answer %q lacks %s", got, want)
+		}
+	}
+}
+
+// A notification has no id to answer: a non-2xx answer to it is dropped and
+// logged, not turned into a message the client cannot place.
+func TestErrorStatusToANotificationIsDroppedAndLogged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	var logs syncBuffer
+	tr, _ := NewHTTP(srv.URL, WithLogs(&logs))
+	defer tr.Close()
+
+	if err := tr.Send([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if !strings.Contains(logs.String(), "HTTP 502") {
+		t.Errorf("the dropped answer was not logged: %q", logs.String())
 	}
 }
 
@@ -403,4 +426,22 @@ func TestUnauthorizedKeepsItsCauseWhenNoTokenRemains(t *testing.T) {
 	if !strings.Contains(err.Error(), "mcp-bridge login x") {
 		t.Errorf("the fix was lost: %v", err)
 	}
+}
+
+// syncBuffer is a log writer the transport's goroutines can share.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

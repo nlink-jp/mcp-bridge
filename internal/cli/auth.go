@@ -43,7 +43,8 @@ type credential struct {
 // so there is real information to be had without a token.
 func buildTransportOptions(srv *config.Server, name string, logs io.Writer, allowMissingLogin bool) ([]transport.Option, credential, error) {
 	opts, cred, err := authOptions(srv, name, logs, allowMissingLogin)
-	return append(opts, connectionOptions(srv)...), cred, err
+	opts = append(opts, connectionOptions(srv)...)
+	return append(opts, transport.WithLogs(logs)), cred, err
 }
 
 // connectionOptions holds what every connection to the server needs whether or
