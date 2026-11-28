@@ -2,4 +2,4 @@ module github.com/nlink-jp/mcp-bridge
 
 go 1.23.4
 
-require github.com/nlink-jp/mcp v0.2.0
+require github.com/nlink-jp/mcp v0.3.0
